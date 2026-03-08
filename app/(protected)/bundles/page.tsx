@@ -1,0 +1,1 @@
+export default function BundlesPage(){return <div><h1 className='text-2xl font-semibold'>Bundles</h1><div className='card p-4'>Coming soon</div></div>}
