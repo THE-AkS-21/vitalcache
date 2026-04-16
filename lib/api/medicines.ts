@@ -1,19 +1,17 @@
-import { api } from './http'
+import { api } from './http';
 
 export type Medicine = {
-    id: number
-    name: string
-    dose?: string
-    duration_days?: number
-    frequency?: string
-    recommended_brands?: string
-    description?: string
-    manufacturer?: string
-    price: number
-    stock: number
-}
+    id: string;
+    name: string;
+    type: string;
+    dosage_options: string[];
+    frequency_suggestions: string[];
+    recommended_brands: string[];
+};
 
-export async function listMedicines(params?: { limit?: number; offset?: number }): Promise<Medicine[]> {
-    const { data } = await api.get<Medicine[]>('/api/v1/medicines', { params })
-    return data
-}
+export const medicinesApi = {
+    search: async (query: string, limit = 50) => {
+        const { data } = await api.get('/medicines/search', { params: { q: query, limit } });
+        return data as { data: Medicine[]; total: number };
+    }
+};

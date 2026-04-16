@@ -618,6 +618,12 @@
 /* ============================================
    ACCESSIBILITY - Reduced Motion
    ============================================ */
+@media print {
+  body { background-color: white !important; }
+  .no-print { display: none !important; }
+  .print-only { display: block !important; }
+  @page { margin: 0; size: A4; }
+}
 
 @media (prefers-reduced-motion: reduce) {
 
@@ -637,4 +643,140 @@
   .animate-shimmer {
     animation: none !important;
   }
+}
+
+/* ============================================================
+   CLAYMORPHISM DESIGN SYSTEM  — VitalCache
+   Appended after existing globals.css content
+   ============================================================ */
+
+/* ── Claymorphism Card ───────────────────────────────────── */
+@layer utilities {
+  /* Core clay card — the signature look */
+  .clay-card {
+    @apply rounded-3xl border border-white/60 bg-white/80 backdrop-blur-xl;
+    box-shadow:
+            0 8px 32px rgba(99, 102, 241, 0.10),
+            0 2px 8px  rgba(99, 102, 241, 0.06),
+            inset 0 1px 0 rgba(255,255,255,0.8);
+  }
+
+  /* Elevated variant — for stat cards and primary surfaces */
+  .clay-card-elevated {
+    @apply rounded-3xl border border-white/70 bg-white/90 backdrop-blur-xl;
+    box-shadow:
+            0 16px 48px rgba(99, 102, 241, 0.14),
+            0 4px 12px  rgba(99, 102, 241, 0.08),
+            inset 0 1.5px 0 rgba(255,255,255,0.9),
+            inset 0 -1px 0 rgba(0,0,0,0.03);
+  }
+
+  /* Dark variant for sidebar / nav */
+  .clay-dark {
+    @apply rounded-3xl border border-slate-700/50 bg-slate-900/90 backdrop-blur-xl;
+    box-shadow:
+            0 16px 48px rgba(0,0,0,0.4),
+            0 4px 12px  rgba(0,0,0,0.2),
+            inset 0 1px 0 rgba(255,255,255,0.06);
+  }
+
+  /* Clay button — primary action */
+  .clay-btn {
+    @apply rounded-2xl font-semibold transition-all duration-200 active:scale-95;
+    box-shadow:
+            0 6px 20px rgba(99, 102, 241, 0.35),
+            0 2px 6px  rgba(99, 102, 241, 0.2),
+            inset 0 1px 0 rgba(255,255,255,0.25);
+  }
+  .clay-btn:hover {
+    box-shadow:
+            0 10px 30px rgba(99, 102, 241, 0.45),
+            0 4px 10px  rgba(99, 102, 241, 0.25),
+            inset 0 1px 0 rgba(255,255,255,0.3);
+    @apply -translate-y-0.5;
+  }
+
+  /* Clay input */
+  .clay-input {
+    @apply rounded-2xl border border-white/60 bg-white/70 backdrop-blur-sm;
+    @apply focus:outline-none focus:ring-2 focus:ring-indigo-400/40 focus:border-indigo-300;
+    @apply transition-all duration-200;
+    box-shadow:
+            inset 0 2px 6px rgba(0,0,0,0.05),
+            0 1px 3px rgba(255,255,255,0.8);
+  }
+
+  /* Coloured blob blobs for animated background */
+  .blob {
+    @apply absolute rounded-full blur-3xl opacity-20 pointer-events-none;
+    animation: float 6s ease-in-out infinite;
+  }
+  .blob-indigo  { @apply bg-indigo-300; }
+  .blob-violet  { @apply bg-violet-300; }
+  .blob-sky     { @apply bg-sky-300; }
+  .blob-emerald { @apply bg-emerald-200; }
+  .blob-rose    { @apply bg-rose-200; }
+
+  /* ── Status badges ─────────────────────────────────────── */
+  .badge-success   { @apply rounded-full px-3 py-0.5 text-xs font-semibold bg-emerald-100 text-emerald-700 border border-emerald-200; }
+  .badge-warning   { @apply rounded-full px-3 py-0.5 text-xs font-semibold bg-amber-100  text-amber-700  border border-amber-200; }
+  .badge-error     { @apply rounded-full px-3 py-0.5 text-xs font-semibold bg-red-100    text-red-700    border border-red-200; }
+  .badge-info      { @apply rounded-full px-3 py-0.5 text-xs font-semibold bg-sky-100    text-sky-700    border border-sky-200; }
+  .badge-neutral   { @apply rounded-full px-3 py-0.5 text-xs font-semibold bg-slate-100  text-slate-600  border border-slate-200; }
+
+  /* ── Gradient text ─────────────────────────────────────── */
+  .text-gradient-indigo {
+    @apply bg-clip-text text-transparent;
+    background-image: linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #06b6d4 100%);
+  }
+  .text-gradient-health {
+    @apply bg-clip-text text-transparent;
+    background-image: linear-gradient(135deg, #0ea5e9 0%, #10b981 100%);
+  }
+
+  /* ── Stat card accent bars ─────────────────────────────── */
+  .accent-indigo { background: linear-gradient(135deg, #6366f1, #8b5cf6); }
+  .accent-emerald{ background: linear-gradient(135deg, #10b981, #06b6d4); }
+  .accent-rose   { background: linear-gradient(135deg, #f43f5e, #fb923c); }
+  .accent-amber  { background: linear-gradient(135deg, #f59e0b, #eab308); }
+
+  /* ── Sidebar nav item ──────────────────────────────────── */
+  .nav-item {
+    @apply flex items-center gap-3 px-4 py-3 rounded-2xl font-medium text-sm;
+    @apply text-slate-400 transition-all duration-200 cursor-pointer;
+  }
+  .nav-item:hover {
+    @apply bg-white/10 text-white;
+  }
+  .nav-item.active {
+    @apply bg-white/15 text-white;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.1);
+  }
+
+  /* ── Page background mesh ──────────────────────────────── */
+  .page-bg {
+    background-color: #f0f4ff;
+    background-image:
+            radial-gradient(at 10% 10%,  hsl(240, 100%, 96%) 0px, transparent 50%),
+            radial-gradient(at 90% 5%,   hsl(280, 100%, 95%) 0px, transparent 45%),
+            radial-gradient(at 50% 80%,  hsl(200, 100%, 96%) 0px, transparent 50%);
+    min-height: 100vh;
+  }
+
+  /* ── Micro-interaction: card hover lift ────────────────── */
+  .card-lift {
+    @apply transition-all duration-300 ease-out;
+  }
+  .card-lift:hover {
+    @apply -translate-y-1;
+    box-shadow:
+            0 20px 60px rgba(99, 102, 241, 0.18),
+            0 6px 16px  rgba(99, 102, 241, 0.10),
+            inset 0 1px 0 rgba(255,255,255,0.9);
+  }
+
+  /* ── Scrollbar ─────────────────────────────────────────── */
+  .scrollbar-thin::-webkit-scrollbar        { width: 4px; }
+  .scrollbar-thin::-webkit-scrollbar-track  { background: transparent; }
+  .scrollbar-thin::-webkit-scrollbar-thumb  { @apply bg-indigo-200 rounded-full; }
 }

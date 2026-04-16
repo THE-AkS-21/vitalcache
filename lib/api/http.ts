@@ -1,141 +1,79 @@
-import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios'
-import { tokenStore } from '../auth/token-store'
+// lib/api/http.ts
+import axios from 'axios';
+import { useAuthStore } from '@/store/authStore';
 
-const isProduction = process.env.NODE_ENV === 'production'
+const BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080/api/v1';
 
 export const api = axios.create({
-  baseURL: process.env.NEXT_PUBLIC_API_URL,
-  withCredentials: true,
-  timeout: 10000, // 10 second timeout
-  headers: {
-    'Content-Type': 'application/json',
-  },
-})
+  baseURL: BASE_URL,
+  headers: { 'Content-Type': 'application/json' },
+  timeout: 15000,
+});
 
-// Request interceptor - add auth token and logging
-api.interceptors.request.use(
-  (config) => {
-    const token = tokenStore.get()
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`
-    }
-
-    // Log requests in development
-    if (!isProduction) {
-      console.log(`[API] ${config.method?.toUpperCase()} ${config.url}`, {
-        params: config.params,
-        data: config.data,
-      })
-    }
-
-    return config
-  },
-  (error) => {
-    if (!isProduction) {
-      console.error('[API] Request error:', error)
-    }
-    return Promise.reject(error)
+// ── Request Interceptor ───────────────────────────────────────────────────────
+api.interceptors.request.use((config) => {
+  const token = useAuthStore.getState().accessToken;
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
   }
-)
 
-// Token refresh state
-let isRefreshing = false
-let refreshQueue: Array<(token: string) => void> = []
+  // Auto-inject Idempotency-Key for mutating requests
+  if (['post', 'patch', 'put'].includes(config.method || '')) {
+    config.headers['Idempotency-Key'] = crypto.randomUUID();
+  }
 
-// Response interceptor - handle token refresh and logging
+  return config;
+});
+
+// ── Response Interceptor (Auto-Refresh Logic) ────────────────────────────────
+let isRefreshing = false;
+let failedQueue: Array<{ resolve: (t: string) => void; reject: (e: unknown) => void }> = [];
+
+const processQueue = (error: unknown, token: string | null) => {
+  failedQueue.forEach((p) => (error ? p.reject(error) : p.resolve(token!)));
+  failedQueue = [];
+};
+
 api.interceptors.response.use(
-  (response) => {
-    // Log responses in development
-    if (!isProduction) {
-      console.log(`[API] ✓ ${response.config.method?.toUpperCase()} ${response.config.url}`, {
-        status: response.status,
-        data: response.data,
-      })
-    }
-    return response
-  },
-  async (error: AxiosError) => {
-    const originalRequest = error.config as InternalAxiosRequestConfig & { _retry?: boolean }
-    const status = error.response?.status
+    (res) => res,
+    async (err) => {
+      const originalRequest = err.config;
 
-    // Log errors in development
-    if (!isProduction) {
-      console.error(`[API] ✗ ${originalRequest?.method?.toUpperCase()} ${originalRequest?.url}`, {
-        status,
-        error: error.response?.data,
-      })
-    }
+      // 401 Unauthorized handling
+      if (err.response?.status === 401 && !originalRequest._retry) {
+        if (isRefreshing) {
+          return new Promise((resolve, reject) => {
+            failedQueue.push({ resolve, reject });
+          }).then((token) => {
+            originalRequest.headers.Authorization = `Bearer ${token}`;
+            return api(originalRequest);
+          }).catch((err) => Promise.reject(err));
+        }
 
-    // Handle 401 Unauthorized - attempt token refresh
-    if (status === 401 && originalRequest && !originalRequest._retry) {
-      if (!isRefreshing) {
-        isRefreshing = true
-        originalRequest._retry = true
+        originalRequest._retry = true;
+        isRefreshing = true;
 
         try {
-          // Call refresh endpoint (uses HTTP-only cookie)
-          const response = await api.post('/api/auth/refresh', {})
-          const newToken = response.data.accessToken
+          const refreshToken = useAuthStore.getState().refreshToken;
+          if (!refreshToken) throw new Error("No refresh token");
 
-          // Update stored token
-          tokenStore.set(newToken)
+          const { data } = await axios.post(`${BASE_URL}/auth/refresh`, { refreshToken });
+          const { access_token, refresh_token } = data; // From Go TokenPair struct
 
-          // Resolve all queued requests with new token
-          refreshQueue.forEach((callback) => callback(newToken))
-          refreshQueue = []
+          useAuthStore.getState().setTokens(access_token, refresh_token);
+          processQueue(null, access_token);
 
-          // Retry original request with new token
-          originalRequest.headers.Authorization = `Bearer ${newToken}`
-          return api.request(originalRequest)
+          originalRequest.headers.Authorization = `Bearer ${access_token}`;
+          return api(originalRequest);
         } catch (refreshError) {
-          // Refresh failed - clear token and redirect to login
-          tokenStore.clear()
-          refreshQueue = []
-
-          // Redirect to login if not already there
-          if (typeof window !== 'undefined' && !window.location.pathname.includes('/login')) {
-            window.location.href = '/login'
-          }
-
-          return Promise.reject(refreshError)
+          processQueue(refreshError, null);
+          useAuthStore.getState().logout();
+          if (typeof window !== 'undefined') window.location.href = '/login';
+          return Promise.reject(refreshError);
         } finally {
-          isRefreshing = false
+          isRefreshing = false;
         }
       }
-
-      // Queue the request while refresh is in progress
-      return new Promise((resolve, reject) => {
-        refreshQueue.push((token: string) => {
-          originalRequest.headers.Authorization = `Bearer ${token}`
-          api.request(originalRequest).then(resolve).catch(reject)
-        })
-      })
+      return Promise.reject(err);
     }
-
-    return Promise.reject(error)
-  }
-)
-
-// Retry logic for network errors
-api.interceptors.response.use(undefined, async (error: AxiosError) => {
-  const config = error.config as InternalAxiosRequestConfig & { _retryCount?: number }
-
-  // Only retry network errors, not 4xx/5xx
-  if (!error.response && config) {
-    config._retryCount = config._retryCount || 0
-
-    if (config._retryCount < 2) {
-      config._retryCount += 1
-
-      if (!isProduction) {
-        console.log(`[API] Retrying request (${config._retryCount}/2):`, config.url)
-      }
-
-      // Wait before retrying (exponential backoff)
-      await new Promise((resolve) => setTimeout(resolve, (config._retryCount || 1) * 1000))
-      return api.request(config)
-    }
-  }
-
-  return Promise.reject(error)
-})
+);

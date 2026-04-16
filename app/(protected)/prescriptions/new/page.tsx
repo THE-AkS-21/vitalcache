@@ -1,201 +1,244 @@
-'use client'
-import { useState } from 'react'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Textarea } from '@/components/ui/textarea'
-import { useMutation, useQuery } from '@tanstack/react-query'
-import { createPrescription } from '@/lib/api/prescriptions'
-import { listMedicines } from '@/lib/api/medicines'
-import { useRouter } from 'next/navigation'
-import { Plus, Trash } from 'lucide-react'
-import { PageHeader } from '@/components/shared/page-header'
-import { Icons } from '@/components/ui/icons'
+"use client";
+
+import React, { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
+import { motion, AnimatePresence } from 'framer-motion';
+import { Save, User, Trash2, FileText, AlertCircle, Loader2 } from 'lucide-react';
+import { ClayCard } from '@/components/ui/card'; // Using your generic card or ClayCard
+import { MedicineSearch } from '@/components/ui/medicine-search';
+import { patientsApi, Patient } from '@/lib/api/patients';
+import { prescriptionsApi, Medication } from '@/lib/api/prescriptions';
+import { Medicine } from '@/lib/api/medicines';
 
 export default function NewPrescriptionPage() {
-  const router = useRouter()
-  const [patientId, setPatientId] = useState('')
-  const [notes, setNotes] = useState('')
-  const [selectedMedicines, setSelectedMedicines] = useState<Array<{ medicine_id: number, dose: string, duration: string, frequency: string }>>([])
+  const router = useRouter();
+  const [patients, setPatients] = useState<Patient[]>([]);
+  const [loadingPatients, setLoadingPatients] = useState(true);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const { data: medicines } = useQuery({
-    queryKey: ['medicines'],
-    queryFn: () => listMedicines({ limit: 100 })
-  })
+  // Form State
+  const [selectedPatientId, setSelectedPatientId] = useState<string>('');
+  const [medications, setMedications] = useState<Medication[]>([]);
+  const [notes, setNotes] = useState('');
 
-  const mutation = useMutation({
-    mutationFn: createPrescription,
-    onSuccess: () => {
-      router.push('/prescriptions')
+  // 1. Fetch Patients on load
+  useEffect(() => {
+    const fetchPatients = async () => {
+      try {
+        const res = await patientsApi.list(100, 0);
+        setPatients(res.data);
+      } catch (err) {
+        console.error("Failed to load patients", err);
+        setError("Failed to load patients. Please try refreshing.");
+      } finally {
+        setLoadingPatients(false);
+      }
+    };
+    fetchPatients();
+  }, []);
+
+  // 2. Add Medicine from Autocomplete to the Medication Array
+  const handleAddMedicine = (med: Medicine) => {
+    // Check if already added
+    if (medications.some(m => m.medicine_id === med.id)) return;
+
+    const newMedication: Medication = {
+      medicine_id: med.id,
+      name: med.name,
+      dosage: med.dosage_options?.[0] || '1 Tablet',
+      frequency: med.frequency_suggestions?.[0] || 'Twice a day',
+      duration_days: 5, // Default duration
+      instructions: 'After food',
+    };
+    setMedications([...medications, newMedication]);
+  };
+
+  // 3. Update specific fields of a selected medication
+  const updateMedication = (index: number, field: keyof Medication, value: string | number) => {
+    const updated = [...medications];
+    updated[index] = { ...updated[index], [field]: value };
+    setMedications(updated);
+  };
+
+  // 4. Remove a medication
+  const removeMedication = (index: number) => {
+    setMedications(medications.filter((_, i) => i !== index));
+  };
+
+  // 5. Submit to Go Backend
+  const handleSubmit = async () => {
+    setError(null);
+    if (!selectedPatientId) return setError("Please select a patient.");
+    if (medications.length === 0) return setError("Please add at least one medication.");
+
+    setIsSubmitting(true);
+    try {
+      // NOTE: Using a dummy hospital UUID. In a real app, pull this from the authStore / doctor profile.
+      const dummyHospitalId = "00000000-0000-0000-0000-000000000000";
+
+      const payload = {
+        patient_id: selectedPatientId,
+        hospital_id: dummyHospitalId,
+        medications,
+        notes
+      };
+
+      const res = await prescriptionsApi.create(payload);
+      // Redirect to the printable view we created earlier
+      router.push(`/prescriptions/${res.id}/print`);
+    } catch (err: any) {
+      console.error(err);
+      setError(err?.response?.data?.error?.message || "Failed to create prescription.");
+      setIsSubmitting(false);
     }
-  })
-
-  const addMedicine = () => {
-    if (medicines && medicines.length > 0) {
-      setSelectedMedicines([...selectedMedicines, { medicine_id: medicines[0].id, dose: '', duration: '', frequency: '' }])
-    }
-  }
-
-  const removeMedicine = (index: number) => {
-    setSelectedMedicines(selectedMedicines.filter((_, i) => i !== index))
-  }
-
-  const updateMedicine = (index: number, field: keyof typeof selectedMedicines[0], value: string | number) => {
-    const newMedicines = [...selectedMedicines]
-    newMedicines[index] = { ...newMedicines[index], [field]: value }
-    setSelectedMedicines(newMedicines)
-  }
-
-  const submit = () => {
-    mutation.mutate({
-      patient_id: Number(patientId),
-      notes,
-      medicines: selectedMedicines
-    })
-  }
+  };
 
   return (
-    <div className="space-y-6 animate-fade-in">
-      <PageHeader title="New Prescription" description="Create a new prescription for a patient." />
+      <div className="p-8 max-w-5xl mx-auto">
+        <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="mb-8">
+          <h1 className="text-3xl font-bold text-clay-text flex items-center">
+            <FileText className="mr-3 text-indigo-500" size={32} />
+            Create New Prescription
+          </h1>
+          <p className="text-gray-500 mt-2">Search medicines, define dosages, and generate a printable record.</p>
+        </motion.div>
 
-      <div className="grid gap-6 lg:grid-cols-3">
-        <div className="lg:col-span-2 space-y-6">
-          <div className="card p-6 space-y-6 border-none shadow-xl bg-white/50 backdrop-blur-xl">
-            <div className="space-y-2">
-              <label className="text-sm font-medium flex items-center gap-2">
-                <Icons.patients className="h-4 w-4 text-blue-600" />
-                Patient ID
-              </label>
-              <Input
-                value={patientId}
-                onChange={e => setPatientId(e.target.value)}
-                placeholder="Enter Patient ID"
-                className="bg-white/50"
-              />
+        {error && (
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="mb-6 p-4 bg-red-100 text-red-700 rounded-xl flex items-center shadow-sm">
+              <AlertCircle className="mr-2" size={20} />
+              {error}
+            </motion.div>
+        )}
+
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+          {/* LEFT COLUMN: Patient Selection & Medicine Search */}
+          <div className="lg:col-span-1 space-y-6">
+            <div className="bg-[#e0e5ec] shadow-clay-out rounded-2xl p-6 border border-white/40">
+              <h2 className="text-lg font-bold text-gray-700 flex items-center mb-4">
+                <User className="mr-2 text-indigo-500" size={20} />
+                Select Patient
+              </h2>
+              {loadingPatients ? (
+                  <p className="text-sm text-gray-500 animate-pulse">Loading patients...</p>
+              ) : (
+                  <select
+                      value={selectedPatientId}
+                      onChange={(e) => setSelectedPatientId(e.target.value)}
+                      className="w-full p-3 rounded-xl border-none shadow-clay-in bg-[#e0e5ec] text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                  >
+                    <option value="" disabled>Choose a patient...</option>
+                    {patients.map(p => (
+                        <option key={p.id} value={p.id}>{p.first_name} {p.last_name}</option>
+                    ))}
+                  </select>
+              )}
             </div>
 
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <label className="text-sm font-medium flex items-center gap-2">
-                  <Icons.pill className="h-4 w-4 text-blue-600" />
-                  Medicines
-                </label>
-                <Button variant="outline" size="sm" onClick={addMedicine} className="hover:bg-blue-50 hover:text-blue-600 hover:border-blue-200 transition-all">
-                  <Plus className="w-4 h-4 mr-2" /> Add Medicine
-                </Button>
-              </div>
-
-              <div className="space-y-3">
-                {selectedMedicines.map((item, index) => (
-                  <div key={index} className="flex flex-col gap-3 p-4 border rounded-xl bg-white/50 shadow-sm hover:shadow-md transition-all">
-                    <div className="flex gap-3 items-center">
-                      <div className="flex-1">
-                        <label className="text-xs text-muted-foreground mb-1 block">Medicine Name</label>
-                        <select
-                          className="flex h-10 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-                          value={item.medicine_id}
-                          onChange={e => updateMedicine(index, 'medicine_id', Number(e.target.value))}
-                        >
-                          {medicines?.map(m => (
-                            <option key={m.id} value={m.id}>{m.name} (${m.price})</option>
-                          ))}
-                        </select>
-                      </div>
-                      <Button variant="ghost" size="icon" onClick={() => removeMedicine(index)} className="text-red-500 hover:text-red-600 hover:bg-red-50 flex-shrink-0 mt-5">
-                        <Trash className="w-4 h-4" />
-                      </Button>
-                    </div>
-                    <div className="grid grid-cols-3 gap-3">
-                      <div>
-                        <label className="text-xs text-muted-foreground mb-1 block">Dose</label>
-                        <Input
-                          placeholder="e.g. 500mg"
-                          value={item.dose}
-                          onChange={e => updateMedicine(index, 'dose', e.target.value)}
-                          className="bg-white"
-                        />
-                      </div>
-                      <div>
-                        <label className="text-xs text-muted-foreground mb-1 block">Duration</label>
-                        <Input
-                          placeholder="e.g. 5 days"
-                          value={item.duration}
-                          onChange={e => updateMedicine(index, 'duration', e.target.value)}
-                          className="bg-white"
-                        />
-                      </div>
-                      <div>
-                        <label className="text-xs text-muted-foreground mb-1 block">Frequency</label>
-                        <Input
-                          placeholder="e.g. 1-0-1"
-                          value={item.frequency}
-                          onChange={e => updateMedicine(index, 'frequency', e.target.value)}
-                          className="bg-white"
-                        />
-                      </div>
-                    </div>
-                  </div>
-                ))}
-                {selectedMedicines.length === 0 && (
-                  <div className="flex flex-col items-center justify-center py-12 border-2 border-dashed rounded-xl bg-slate-50/50 text-muted-foreground">
-                    <Icons.pill className="h-8 w-8 mb-2 opacity-20" />
-                    <p className="text-sm">No medicines added yet</p>
-                    <Button variant="link" onClick={addMedicine} className="text-blue-600">Add your first medicine</Button>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Notes</label>
-              <Textarea
-                value={notes}
-                onChange={e => setNotes(e.target.value)}
-                placeholder="Additional instructions..."
-                className="min-h-[100px] bg-white/50"
-              />
-            </div>
-          </div>
-        </div>
-
-        <div className="space-y-6">
-          <div className="card p-6 border-none shadow-xl bg-gradient-to-br from-blue-600 to-purple-700 text-white">
-            <h3 className="font-semibold text-lg mb-2">Summary</h3>
-            <div className="space-y-4 text-blue-100 text-sm">
-              <div className="flex justify-between">
-                <span>Patient ID</span>
-                <span className="font-mono bg-white/20 px-2 rounded">{patientId || '-'}</span>
-              </div>
-              <div className="flex justify-between">
-                <span>Medicines Count</span>
-                <span>{selectedMedicines.length}</span>
-              </div>
-            </div>
-            <div className="mt-6 pt-6 border-t border-white/20">
-              <Button
-                onClick={submit}
-                disabled={mutation.isPending}
-                className="w-full bg-white text-blue-600 hover:bg-blue-50 border-none shadow-lg"
-              >
-                {mutation.isPending ? (
-                  <>
-                    <Icons.spinner className="mr-2 h-4 w-4 animate-spin" />
-                    Creating...
-                  </>
-                ) : (
-                  'Create Prescription'
-                )}
-              </Button>
+            <div className="bg-[#e0e5ec] shadow-clay-out rounded-2xl p-6 border border-white/40">
+              <h2 className="text-lg font-bold text-gray-700 mb-4">Add Medicine</h2>
+              <MedicineSearch onSelect={handleAddMedicine} />
             </div>
           </div>
 
-          {mutation.isError && (
-            <div className="p-4 bg-red-50 text-red-600 rounded-xl border border-red-100 text-sm flex items-center gap-2">
-              <Icons.alert className="h-4 w-4" />
-              Failed to create prescription. Please check inputs.
+          {/* RIGHT COLUMN: The Rx Form (Medications List) */}
+          <div className="lg:col-span-2 space-y-6">
+            <div className="bg-[#e0e5ec] shadow-clay-out rounded-2xl p-6 border border-white/40 min-h-[400px] flex flex-col">
+              <h2 className="text-xl font-bold text-gray-800 mb-6 border-b border-gray-300 pb-2">Rx Medications</h2>
+
+              {medications.length === 0 ? (
+                  <div className="flex-1 flex flex-col items-center justify-center text-gray-400">
+                    <FileText size={48} className="mb-4 opacity-50" />
+                    <p>No medications added yet.</p>
+                    <p className="text-sm mt-1">Use the search bar on the left to add medicines.</p>
+                  </div>
+              ) : (
+                  <div className="flex-1 space-y-4">
+                    <AnimatePresence>
+                      {medications.map((med, idx) => (
+                          <motion.div
+                              key={med.medicine_id + idx}
+                              initial={{ opacity: 0, x: -20 }}
+                              animate={{ opacity: 1, x: 0 }}
+                              exit={{ opacity: 0, scale: 0.95 }}
+                              className="bg-white/50 backdrop-blur-sm p-4 rounded-xl shadow-sm border border-white flex flex-col sm:flex-row gap-4 relative"
+                          >
+                            <button
+                                onClick={() => removeMedication(idx)}
+                                className="absolute top-4 right-4 text-gray-400 hover:text-red-500 transition"
+                            >
+                              <Trash2 size={18} />
+                            </button>
+
+                            <div className="flex-1">
+                              <h3 className="font-bold text-lg text-indigo-900 mb-3">{med.name}</h3>
+
+                              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                                <div>
+                                  <label className="text-xs font-semibold text-gray-500 uppercase">Dosage</label>
+                                  <input
+                                      type="text" value={med.dosage}
+                                      onChange={(e) => updateMedication(idx, 'dosage', e.target.value)}
+                                      className="w-full mt-1 p-2 bg-transparent border-b border-gray-300 focus:border-indigo-500 outline-none text-sm font-medium text-gray-800"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="text-xs font-semibold text-gray-500 uppercase">Frequency</label>
+                                  <input
+                                      type="text" value={med.frequency}
+                                      onChange={(e) => updateMedication(idx, 'frequency', e.target.value)}
+                                      className="w-full mt-1 p-2 bg-transparent border-b border-gray-300 focus:border-indigo-500 outline-none text-sm font-medium text-gray-800"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="text-xs font-semibold text-gray-500 uppercase">Duration (Days)</label>
+                                  <input
+                                      type="number" value={med.duration_days} min={1}
+                                      onChange={(e) => updateMedication(idx, 'duration_days', parseInt(e.target.value) || 1)}
+                                      className="w-full mt-1 p-2 bg-transparent border-b border-gray-300 focus:border-indigo-500 outline-none text-sm font-medium text-gray-800"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="text-xs font-semibold text-gray-500 uppercase">Instructions</label>
+                                  <input
+                                      type="text" value={med.instructions}
+                                      onChange={(e) => updateMedication(idx, 'instructions', e.target.value)}
+                                      className="w-full mt-1 p-2 bg-transparent border-b border-gray-300 focus:border-indigo-500 outline-none text-sm font-medium text-gray-800"
+                                  />
+                                </div>
+                              </div>
+                            </div>
+                          </motion.div>
+                      ))}
+                    </AnimatePresence>
+                  </div>
+              )}
+
+              {/* Notes Section */}
+              <div className="mt-8">
+                <label className="block text-sm font-bold text-gray-700 mb-2">Clinical Notes & Advice</label>
+                <textarea
+                    value={notes}
+                    onChange={(e) => setNotes(e.target.value)}
+                    placeholder="Drink plenty of water, rest for 3 days..."
+                    className="w-full p-4 rounded-xl border-none shadow-clay-in bg-[#e0e5ec] text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-400 min-h-[100px] resize-none"
+                />
+              </div>
+
+              {/* Submit Action */}
+              <div className="mt-8 pt-4 border-t border-gray-300 flex justify-end">
+                <button
+                    onClick={handleSubmit}
+                    disabled={isSubmitting || medications.length === 0 || !selectedPatientId}
+                    className="flex items-center px-6 py-3 bg-indigo-600 text-white font-bold rounded-xl shadow-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all hover:-translate-y-1"
+                >
+                  {isSubmitting ? <Loader2 className="animate-spin mr-2" size={20} /> : <Save className="mr-2" size={20} />}
+                  {isSubmitting ? "Generating..." : "Save & Print Prescription"}
+                </button>
+              </div>
             </div>
-          )}
+          </div>
         </div>
       </div>
-    </div>
-  )
+  );
 }
