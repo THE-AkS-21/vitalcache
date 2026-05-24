@@ -12,6 +12,7 @@ import { useAuthStore } from '@/store/authStore'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Icons } from '@/components/ui/icons'
+import Link from 'next/link'
 
 type LoginFormData = LoginInput
 
@@ -226,7 +227,12 @@ export default function LoginPage() {
                             <h2 className="text-3xl font-bold bg-gradient-to-r from-gray-900 to-gray-700 bg-clip-text text-transparent mb-2">
                                 Welcome back
                             </h2>
-                            <p className="text-gray-600">Sign in to your account to continue</p>
+                            <p className="mt-2 text-sm text-gray-600">
+                                Don't have an account?{' '}
+                                <Link href="/register" className="font-medium text-blue-600 hover:text-blue-500 transition-colors">
+                                    Sign up here
+                                </Link> to continue
+                            </p>
                         </div>
 
                         {/* Error message */}

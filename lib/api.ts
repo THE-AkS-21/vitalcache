@@ -6,7 +6,7 @@ import axios from 'axios';
 import { useAuthStore } from '@/store/authStore';
 import { queryClient } from '@/components/shell/query-provider';
 
-const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8080';
+const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8080/api/v1';
 
 export const api = axios.create({
   baseURL: BASE_URL,
@@ -58,7 +58,7 @@ api.interceptors.response.use(
     try {
       // 🔥 Empty body — browser sends HttpOnly refresh cookie automatically via withCredentials
       const { data } = await axios.post<{ data: { access_token: string } }>(
-        `${BASE_URL}/api/v1/auth/refresh`,
+        `${BASE_URL}/auth/refresh`,
         {},
         { withCredentials: true }
       );
@@ -108,18 +108,24 @@ export const authApi = {
    * ❌ NO refresh token ever exposed to JavaScript.
    */
   login: (email: string, password: string) =>
-    api.post<ApiResponse<{ access_token: string; role: string }>>('/api/v1/auth/login', { email, password }),
+    api.post<ApiResponse<{ access_token: string; role: string }>>('/auth/login', { email, password }),
 
-  register: (email: string, password: string, role: string) =>
-    api.post<ApiResponse<{ access_token: string }>>('/api/v1/auth/register', { email, password, role }),
+  register: (data: any) =>
+    api.post<ApiResponse<void>>('/auth/register', data),
+
+  generateInvite: (data: { email: string; role: string; designation?: string }) =>
+    api.post<ApiResponse<{ invite_token: string }>>('/auth/invites', data),
+
+  acceptInvite: (data: any) =>
+    api.post<ApiResponse<void>>('/auth/invites/accept', data),
 
   /**
    * Logout — server clears the HttpOnly cookie via Set-Cookie.
    * ❌ NO refresh token sent in request body.
    */
-  logout: () => api.post('/api/v1/auth/logout'),
+  logout: () => api.post('/auth/logout'),
 
-  refresh: () => api.post<ApiResponse<{ access_token: string }>>('/api/v1/auth/refresh'),
+  refresh: () => api.post<ApiResponse<{ access_token: string }>>('/auth/refresh'),
 };
 
 // Patients
@@ -132,17 +138,17 @@ export type Patient = {
 
 export const patientsApi = {
   list: (params?: { limit?: number; offset?: number }) =>
-    api.get<PagedResponse<Patient>>('/api/v1/patients', { params }),
+    api.get<PagedResponse<Patient>>('/patients', { params }),
   getById: (id: number) =>
-    api.get<ApiResponse<Patient>>(`/api/v1/patients/${id}`),
+    api.get<ApiResponse<Patient>>(`/patients/${id}`),
   create: (data: Partial<Patient>) =>
-    api.post<ApiResponse<Patient>>('/api/v1/patients', data, {
+    api.post<ApiResponse<Patient>>('/patients', data, {
       headers: { 'Idempotency-Key': crypto.randomUUID() },
     }),
   update: (id: number, data: Partial<Patient>) =>
-    api.patch<ApiResponse<Patient>>(`/api/v1/patients/${id}`, data),
+    api.patch<ApiResponse<Patient>>(`/patients/${id}`, data),
   search: (phone: string) =>
-    api.get<PagedResponse<Patient>>('/api/v1/patients/search', { params: { phone } }),
+    api.get<PagedResponse<Patient>>('/patients/search', { params: { phone } }),
 };
 
 // Prescriptions
@@ -158,13 +164,13 @@ export type Prescription = {
 
 export const prescriptionsApi = {
   getById: (id: string) =>
-    api.get<ApiResponse<Prescription>>(`/api/v1/prescriptions/${id}`),
+    api.get<ApiResponse<Prescription>>(`/prescriptions/${id}`),
   listByPatient: (patientId: number, params?: { limit?: number; offset?: number }) =>
-    api.get<PagedResponse<Prescription>>('/api/v1/prescriptions', {
+    api.get<PagedResponse<Prescription>>('/prescriptions', {
       params: { patient_id: patientId, ...params },
     }),
   create: (data: Omit<Prescription, 'id' | 'doctor_id' | 'created_at' | 'updated_at'>) =>
-    api.post<ApiResponse<Prescription>>('/api/v1/prescriptions', data, {
+    api.post<ApiResponse<Prescription>>('/prescriptions', data, {
       headers: { 'Idempotency-Key': crypto.randomUUID() },
     }),
 };
@@ -178,15 +184,15 @@ export type Appointment = {
 
 export const appointmentsApi = {
   list: (params?: { limit?: number; offset?: number }) =>
-    api.get<PagedResponse<Appointment>>('/api/v1/appointments', { params }),
+    api.get<PagedResponse<Appointment>>('/appointments', { params }),
   getById: (id: number) =>
-    api.get<ApiResponse<Appointment>>(`/api/v1/appointments/${id}`),
+    api.get<ApiResponse<Appointment>>(`/appointments/${id}`),
   create: (data: { patient_id: number; scheduled_at: string; notes?: string }) =>
-    api.post<ApiResponse<Appointment>>('/api/v1/appointments', data, {
+    api.post<ApiResponse<Appointment>>('/appointments', data, {
       headers: { 'Idempotency-Key': crypto.randomUUID() },
     }),
   updateStatus: (id: number, status: string, notes?: string) =>
-    api.patch<ApiResponse<Appointment>>(`/api/v1/appointments/${id}/status`, { status, notes }),
+    api.patch<ApiResponse<Appointment>>(`/appointments/${id}/status`, { status, notes }),
 };
 
 // Medicines
@@ -198,9 +204,9 @@ export type Medicine = {
 
 export const medicinesApi = {
   list: (q?: string, params?: { limit?: number; offset?: number }) =>
-    api.get<PagedResponse<Medicine>>('/api/v1/medicines', { params: { q, ...params } }),
+    api.get<PagedResponse<Medicine>>('/medicines', { params: { q, ...params } }),
   getById: (id: string) =>
-    api.get<ApiResponse<Medicine>>(`/api/v1/medicines/${id}`),
+    api.get<ApiResponse<Medicine>>(`/medicines/${id}`),
 };
 
 // Doctors
@@ -212,8 +218,8 @@ export type Doctor = {
 
 export const doctorsApi = {
   list: (params?: { limit?: number; offset?: number }) =>
-    api.get<PagedResponse<Doctor>>('/api/v1/doctors', { params }),
+    api.get<PagedResponse<Doctor>>('/doctors', { params }),
   getById: (id: number) =>
-    api.get<ApiResponse<Doctor>>(`/api/v1/doctors/${id}`),
-  me: () => api.get<ApiResponse<Doctor>>('/api/v1/profiles/me'),
+    api.get<ApiResponse<Doctor>>(`/doctors/${id}`),
+  me: () => api.get<ApiResponse<Doctor>>('/profiles/me'),
 };

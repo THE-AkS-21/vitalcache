@@ -90,6 +90,30 @@ export const loginSchema = z.object({
 
 export type LoginInput = z.infer<typeof loginSchema>;
 
+// ── Register ──────────────────────────────────────────────────────────────────
+
+export const registerSchema = z.object({
+  first_name: z.string().min(2, 'First name must be at least 2 characters'),
+  last_name: z.string().min(2, 'Last name must be at least 2 characters'),
+  email: z.string().email('Invalid email address').toLowerCase().trim(),
+  password: z.string().min(8, 'Password must be at least 8 characters'),
+  phone_number: z.string().optional(),
+  role: z.enum(['DOCTOR', 'PATIENT'], { required_error: 'Role is required' }),
+});
+
+export type RegisterInput = z.infer<typeof registerSchema>;
+
+// ── Invite Accept ─────────────────────────────────────────────────────────────
+
+export const inviteAcceptSchema = z.object({
+  first_name: z.string().min(2, 'First name must be at least 2 characters'),
+  last_name: z.string().min(2, 'Last name must be at least 2 characters'),
+  password: z.string().min(8, 'Password must be at least 8 characters'),
+  phone_number: z.string().optional(),
+});
+
+export type InviteAcceptInput = z.infer<typeof inviteAcceptSchema>;
+
 // ── API Response Validators (parse untrusted backend responses) ───────────────
 // Use these in server-side fetch calls to validate shape before use.
 
