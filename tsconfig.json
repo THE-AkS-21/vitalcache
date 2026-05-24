@@ -25,7 +25,9 @@
       ]
     },
     "types": [
-      "node"
+      "node",
+      "jest",
+      "@testing-library/jest-dom"
     ],
     "plugins": [
       {

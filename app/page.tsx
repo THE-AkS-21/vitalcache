@@ -1,26 +1,24 @@
-'use client';
+/**
+ * app/page.tsx — Root Page
+ *
+ * Pure Server Component. No 'use client'. No Zustand. No useEffect.
+ *
+ * The middleware handles the actual routing:
+ * - Has cookie → middleware redirects to /dashboard before this renders
+ * - No cookie  → middleware redirects to /login before this renders
+ *
+ * This page is the fallback for the root "/" path. In practice, users
+ * will never see it render because middleware intercepts first.
+ * We use a server-side redirect as a belt-and-suspenders safety net.
+ */
 
-import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
-import { useAuthStore } from '@/store/authStore';
+import { redirect } from 'next/navigation';
+import { cookies } from 'next/headers';
 
-export default function Home() {
-  const router = useRouter();
-  const accessToken = useAuthStore((state) => state.accessToken);
-  const [isMounted, setIsMounted] = useState(false);
+export default async function RootPage() {
+  const cookieStore = await cookies();
+  const hasSession = cookieStore.has('refresh_token');
 
-  // Ensure we only run the redirect logic after the component has mounted on the client.
-  // This prevents hydration errors since Zustand's persist reads from localStorage.
-  useEffect(() => {
-    setIsMounted(true);
-  }, []);
-
-  useEffect(() => {
-    if (isMounted) {
-      router.replace(accessToken ? '/dashboard' : '/login');
-    }
-  }, [isMounted, accessToken, router]);
-
-  // Return a completely blank screen while we check the token to prevent flashing
-  return null;
+  // Server-side redirect — zero client JavaScript, zero FOUC
+  redirect(hasSession ? '/dashboard' : '/login');
 }

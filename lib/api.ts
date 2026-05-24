@@ -1,24 +1,32 @@
+// lib/api.ts
+// ── Unified API client (root-level) ──
+// This is the primary API client used by app-level pages and components.
+// lib/api/http.ts is used by the modular API helpers under lib/api/*.ts
 import axios from 'axios';
+import { useAuthStore } from '@/store/authStore';
+import { queryClient } from '@/components/shell/query-provider';
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8080';
 
 export const api = axios.create({
   baseURL: BASE_URL,
-  withCredentials: true, // send httpOnly refresh-token cookie
+  // 🔥 Always include credentials so the browser sends the HttpOnly refresh cookie
+  withCredentials: true,
   headers: { 'Content-Type': 'application/json' },
   timeout: 15_000,
 });
 
-// ── Request interceptor: attach access token ───────────────────────────────────
+// ── Request interceptor: attach in-memory access token ────────────────────────
 api.interceptors.request.use((config) => {
-  if (typeof window !== 'undefined') {
-    const token = sessionStorage.getItem('vc_access_token');
-    if (token) config.headers['Authorization'] = `Bearer ${token}`;
+  // ✅ Access token lives ONLY in Zustand (in-memory). Never sessionStorage/localStorage.
+  const token = useAuthStore.getState().accessToken;
+  if (token) {
+    config.headers['Authorization'] = `Bearer ${token}`;
   }
   return config;
 });
 
-// ── Response interceptor: auto-refresh on 401 ────────────────────────────────
+// ── Response interceptor: silent cookie-based refresh on 401 ─────────────────
 let isRefreshing = false;
 let failedQueue: Array<{ resolve: (t: string) => void; reject: (e: unknown) => void }> = [];
 
@@ -48,19 +56,28 @@ api.interceptors.response.use(
     isRefreshing = true;
 
     try {
-      const { data } = await api.post<{ data: { access_token: string } }>(
-        '/api/auth/refresh',
-        {}
+      // 🔥 Empty body — browser sends HttpOnly refresh cookie automatically via withCredentials
+      const { data } = await axios.post<{ data: { access_token: string } }>(
+        `${BASE_URL}/api/v1/auth/refresh`,
+        {},
+        { withCredentials: true }
       );
       const newToken = data.data.access_token;
-      sessionStorage.setItem('vc_access_token', newToken);
+
+      // ✅ Store new access token only in Zustand memory
+      useAuthStore.getState().setAccessToken(newToken);
       processQueue(null, newToken);
+
       original.headers['Authorization'] = `Bearer ${newToken}`;
       return api(original);
     } catch (refreshErr) {
       processQueue(refreshErr, null);
-      sessionStorage.removeItem('vc_access_token');
-      window.location.href = '/login';
+      // 🔐 PHI eviction: clear ALL React Query cache before redirecting to login.
+      // This eliminates the shared-terminal leak where a new user could see the
+      // previous session's patient/prescription data during the 5-min gcTime window.
+      queryClient?.clear();
+      useAuthStore.getState().logout();
+      if (typeof window !== 'undefined') window.location.href = '/login';
       return Promise.reject(refreshErr);
     } finally {
       isRefreshing = false;
@@ -85,12 +102,24 @@ interface PagedResponse<T> {
 
 // Auth
 export const authApi = {
+  /**
+   * Login — server sets the HttpOnly refresh_token cookie.
+   * Frontend receives only access_token in JSON body.
+   * ❌ NO refresh token ever exposed to JavaScript.
+   */
   login: (email: string, password: string) =>
-    api.post<ApiResponse<{ access_token: string; role: string }>>('/api/auth/login', { email, password }),
+    api.post<ApiResponse<{ access_token: string; role: string }>>('/api/v1/auth/login', { email, password }),
+
   register: (email: string, password: string, role: string) =>
-    api.post<ApiResponse<{ access_token: string }>>('/api/auth/register', { email, password, role }),
-  logout: () => api.post('/api/auth/logout'),
-  refresh: () => api.post<ApiResponse<{ access_token: string }>>('/api/auth/refresh'),
+    api.post<ApiResponse<{ access_token: string }>>('/api/v1/auth/register', { email, password, role }),
+
+  /**
+   * Logout — server clears the HttpOnly cookie via Set-Cookie.
+   * ❌ NO refresh token sent in request body.
+   */
+  logout: () => api.post('/api/v1/auth/logout'),
+
+  refresh: () => api.post<ApiResponse<{ access_token: string }>>('/api/v1/auth/refresh'),
 };
 
 // Patients

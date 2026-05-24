@@ -8,7 +8,7 @@ export class ApiError extends Error {
         message: string,
         public statusCode: number,
         public code?: string,
-        public details?: any
+        public details?: unknown
     ) {
         super(message)
         this.name = 'ApiError'
@@ -19,16 +19,17 @@ export interface ServerErrorResponse {
     error: {
         message: string
         code?: string
-        details?: any
+        details?: unknown
     }
 }
 
 /**
  * Parse error from axios response
  */
-export function parseApiError(error: any): ApiError {
-    const status = error?.response?.status || 500
-    const data = error?.response?.data as ServerErrorResponse | undefined
+export function parseApiError(error: unknown): ApiError {
+    const axiosErr = error as { response?: { status?: number; data?: ServerErrorResponse }; message?: string; code?: string } | null
+    const status = axiosErr?.response?.status ?? 500
+    const data = axiosErr?.response?.data
 
     if (data?.error) {
         return new ApiError(
@@ -40,16 +41,16 @@ export function parseApiError(error: any): ApiError {
     }
 
     // Network error
-    if (error?.message === 'Network Error') {
+    if (axiosErr?.message === 'Network Error') {
         return new ApiError('Unable to connect to server', 0, 'NETWORK_ERROR')
     }
 
     // Timeout
-    if (error?.code === 'ECONNABORTED') {
+    if (axiosErr?.code === 'ECONNABORTED') {
         return new ApiError('Request timeout', 0, 'TIMEOUT')
     }
 
-    return new ApiError(error?.message || 'An unexpected error occurred', status)
+    return new ApiError(axiosErr?.message || 'An unexpected error occurred', status)
 }
 
 /**
