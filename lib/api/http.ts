@@ -101,22 +101,21 @@ api.interceptors.response.use(
     isRefreshing = true;
 
     try {
-      const sessionRes = await fetch('/api/auth/session', {
-        method: 'GET',
-        credentials: 'include',
-        cache: 'no-store',
-      });
+      const { data } = await axios.get<{ access_token: string }>(
+        '/api/auth/session',
+        {
+          baseURL: '/', // Force use of Next.js origin
+          withCredentials: true,
+        }
+      );
 
-      if (!sessionRes.ok) throw new Error('Session refresh failed');
+      if (!data.access_token) throw new Error('No access token in session response');
 
-      const session = (await sessionRes.json()) as SessionResponse;
-      if (!session.access_token) throw new Error('No access token in session response');
-
-      useAuthStore.getState().setAccessToken(session.access_token);
-      flushQueue(null, session.access_token);
+      useAuthStore.getState().setAccessToken(data.access_token);
+      flushQueue(null, data.access_token);
 
       if (originalRequest.headers) {
-        originalRequest.headers['Authorization'] = `Bearer ${session.access_token}`;
+        originalRequest.headers['Authorization'] = `Bearer ${data.access_token}`;
       }
       return api(originalRequest);
     } catch (refreshError) {
