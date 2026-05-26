@@ -1,21 +1,33 @@
-import '../styles/globals.css'
-import type { Metadata } from 'next'
-import { Inter } from 'next/font/google'
-import { cn } from '@/lib/utils'
+import type { Metadata } from "next";
+import { Inter } from "next/font/google";
+import "@/styles/globals.css";
+import { ServerStatus } from "@/components/ui/server-status"; // 1. Import it
 
-const inter = Inter({ subsets: ['latin'] })
+const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: 'VitalCache',
-  description: 'Professional Clinic Management Dashboard',
-}
+    title: "VitalCache",
+    description: "Clinic Management System",
+};
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
-  return (
-    <html lang="en" suppressHydrationWarning>
-      <body className={cn("min-h-screen bg-background font-sans antialiased", inter.className)}>
-        {children}
-      </body>
-    </html>
-  )
+import { GoogleOAuthProvider } from '@react-oauth/google';
+
+export default function RootLayout({
+                                       children,
+                                   }: Readonly<{
+    children: React.ReactNode;
+}>) {
+    const googleClientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || "placeholder-client-id.apps.googleusercontent.com";
+    return (
+        <html lang="en">
+        <body className={inter.className}>
+        <GoogleOAuthProvider clientId={googleClientId}>
+            {/* 2. Add it here, outside of your main children structure */}
+            <ServerStatus />
+
+            {children}
+        </GoogleOAuthProvider>
+        </body>
+        </html>
+    );
 }

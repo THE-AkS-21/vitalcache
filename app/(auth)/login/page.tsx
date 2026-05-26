@@ -1,23 +1,21 @@
 'use client'
 
+import type { AxiosError } from 'axios'
+
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
-import { z } from 'zod'
-import { login } from '@/lib/api/auth'
-import { tokenStore } from '@/lib/auth/token-store'
+import { loginSchema, type LoginInput } from '@/lib/validators'
+import { authApi } from '@/lib/api/auth'
+import { useAuthStore } from '@/store/authStore'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Icons } from '@/components/ui/icons'
+import Link from 'next/link'
+import { GoogleLogin } from '@react-oauth/google'
 
-const loginSchema = z.object({
-    email: z.string().email('Please enter a valid email address'),
-    password: z.string().min(6, 'Password must be at least 6 characters'),
-    rememberMe: z.boolean().optional()
-})
-
-type LoginFormData = z.infer<typeof loginSchema>
+type LoginFormData = LoginInput
 
 // Floating particles component
 function FloatingParticles() {
@@ -58,6 +56,10 @@ export default function LoginPage() {
     const [cursorPosition, setCursorPosition] = useState({ x: 0, y: 0 })
     const [loginSuccess, setLoginSuccess] = useState(false)
 
+    // ✅ Access token stored in memory only; refresh token lives in HttpOnly cookie (set by server)
+    const setAccessToken = useAuthStore((state) => state.setAccessToken)
+    const setUser = useAuthStore((state) => state.setUser)
+
     const {
         register,
         handleSubmit,
@@ -82,22 +84,57 @@ export default function LoginPage() {
         return () => window.removeEventListener('mousemove', handleMouseMove)
     }, [])
 
+    // ✅ Secure login: access token → Zustand memory only; refresh token → HttpOnly cookie (never visible to JS)
     const onSubmit = async (data: LoginFormData) => {
         setError(null)
 
         try {
-            const response = await login({ email: data.email, password: data.password })
-            tokenStore.set(response.accessToken)
+            // authApi uses withCredentials — server sets the HttpOnly refresh_token cookie automatically
+            const payload = await authApi.login(data.email, data.password)
+
+            // Store access token in memory ONLY (never localStorage/sessionStorage)
+            setAccessToken(payload.access_token)
+            // Persist minimal user metadata (no tokens) — in-memory only, no localStorage
+            if (payload.user) setUser(payload.user)
 
             // Show success animation before redirect
             setLoginSuccess(true)
             setTimeout(() => {
                 router.replace('/dashboard')
             }, 800)
-        } catch (err: any) {
-            setError(err.message || 'Login failed. Please try again.')
+        } catch (err: unknown) {
+            const axiosErr = err as AxiosError<{ error?: { message?: string } }>
+            setError(
+                axiosErr?.response?.data?.error?.message ??
+                'Login failed. Please check your credentials.'
+            )
         }
     }
+
+    const handleGoogleSuccess = async (credentialResponse: any) => {
+        setError(null)
+        try {
+            if (!credentialResponse.credential) throw new Error('No credential received');
+            const payload = await authApi.googleLogin(credentialResponse.credential);
+            setAccessToken(payload.access_token);
+            if (payload.user) setUser(payload.user);
+            setLoginSuccess(true);
+            setTimeout(() => {
+                router.replace('/dashboard')
+            }, 800)
+        } catch (err: unknown) {
+            const axiosErr = err as AxiosError<{ error?: { message?: string } }>
+            setError(
+                axiosErr?.response?.data?.error?.message ??
+                'Google Login failed. Please try again.'
+            )
+        }
+    }
+
+    // Only show Google Login when a real client ID is configured.
+    // An empty or placeholder client ID causes a Google 401 invalid_client error.
+    const googleClientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID
+    const hasGoogleAuth = Boolean(googleClientId && !googleClientId.includes('placeholder'))
 
     return (
         <div className="min-h-screen flex overflow-hidden bg-gradient-to-br from-gray-50 to-blue-50 relative">
@@ -216,7 +253,12 @@ export default function LoginPage() {
                             <h2 className="text-3xl font-bold bg-gradient-to-r from-gray-900 to-gray-700 bg-clip-text text-transparent mb-2">
                                 Welcome back
                             </h2>
-                            <p className="text-gray-600">Sign in to your account to continue</p>
+                            <p className="mt-2 text-sm text-gray-600">
+                                Don't have an account?{' '}
+                                <Link href="/register" className="font-medium text-blue-600 hover:text-blue-500 transition-colors">
+                                    Sign up here
+                                </Link> to continue
+                            </p>
                         </div>
 
                         {/* Error message */}
@@ -233,7 +275,7 @@ export default function LoginPage() {
                                 <div className="relative">
                                     <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none z-10">
                                         <Icons.mail className={`h-5 w-5 transition-all duration-200 ${emailFocused || emailValue ? 'text-blue-600 scale-110' : 'text-gray-400'
-                                            }`} />
+                                        }`} />
                                     </div>
 
                                     <Input
@@ -248,7 +290,7 @@ export default function LoginPage() {
 
                                     <label
                                         className={`absolute left-10 text-gray-500 pointer-events-none transition-all duration-200 ${emailFocused || emailValue ? 'top-1 text-xs text-blue-600 font-medium' : 'top-3 text-base'
-                                            }`}
+                                        }`}
                                     >
                                         Email address
                                     </label>
@@ -273,7 +315,7 @@ export default function LoginPage() {
                                 <div className="relative group">
                                     <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none z-10">
                                         <Icons.stethoscope className={`h-5 w-5 transition-all duration-200 ${passwordFocused || passwordValue ? 'text-blue-600 scale-110' : 'text-gray-400'
-                                            }`} />
+                                        }`} />
                                     </div>
 
                                     <Input
@@ -288,7 +330,7 @@ export default function LoginPage() {
 
                                     <label
                                         className={`absolute left-10 text-gray-500 pointer-events-none transition-all duration-200 ${passwordFocused || passwordValue ? 'top-1 text-xs text-blue-600 font-medium' : 'top-3 text-base'
-                                            }`}
+                                        }`}
                                     >
                                         Password
                                     </label>
@@ -329,7 +371,6 @@ export default function LoginPage() {
                                 </label>
                             </div>
 
-                            {/* Submit button */}
                             <Button
                                 type="submit"
                                 disabled={isSubmitting}
@@ -340,6 +381,26 @@ export default function LoginPage() {
                                 {/* Ripple effect on hover */}
                                 <div className="absolute inset-0 bg-white/20 transform scale-x-0 group-hover:scale-x-100 transition-transform duration-500 origin-left" />
                             </Button>
+
+                            <div className="relative my-6">
+                                <div className="absolute inset-0 flex items-center">
+                                    <div className="w-full border-t border-gray-200"></div>
+                                </div>
+                                <div className="relative flex justify-center text-sm">
+                                    <span className="px-2 bg-white/80 text-gray-500">Or continue with</span>
+                                </div>
+                            </div>
+
+                            <div className="flex justify-center mt-4">
+                                <GoogleLogin
+                                    onSuccess={handleGoogleSuccess}
+                                    onError={() => setError('Google login failed. Please use email/password.')}
+                                    theme="outline"
+                                    size="large"
+                                    text="signin_with"
+                                    shape="rectangular"
+                                />
+                            </div>
                         </form>
 
                         <div className="mt-6 text-center">
@@ -385,24 +446,24 @@ export default function LoginPage() {
 
             {/* CSS Animations - keeping existing ones */}
             <style jsx global>{`
-        @keyframes blob {
-          0%, 100% { transform: translate(0, 0) scale(1); }
-          33% { transform: translate(30px, -50px) scale(1.1); }
-          66% { transform: translate(-20px, 20px) scale(0.9); }
-        }
-        
-        .animate-blob {
-          animation: blob 7s infinite;
-        }
-        
-        .animation-delay-2000 {
-          animation-delay: 2s;
-        }
-        
-        .animation-delay-4000 {
-          animation-delay: 4s;
-        }
-      `}</style>
+                @keyframes blob {
+                    0%, 100% { transform: translate(0, 0) scale(1); }
+                    33% { transform: translate(30px, -50px) scale(1.1); }
+                    66% { transform: translate(-20px, 20px) scale(0.9); }
+                }
+
+                .animate-blob {
+                    animation: blob 7s infinite;
+                }
+
+                .animation-delay-2000 {
+                    animation-delay: 2s;
+                }
+
+                .animation-delay-4000 {
+                    animation-delay: 4s;
+                }
+            `}</style>
         </div>
     )
 }

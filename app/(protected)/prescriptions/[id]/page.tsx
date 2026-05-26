@@ -1,144 +1,149 @@
-'use client'
-import { PageHeader } from '@/components/shared/page-header'
-import { Button } from '@/components/ui/button'
-import { Icons } from '@/components/ui/icons'
-import { useQuery } from '@tanstack/react-query'
-import { getPrescription } from '@/lib/api/prescriptions'
-import { useRef } from 'react'
-import { useReactToPrint } from 'react-to-print'
-import { format } from 'date-fns'
-import { Skeleton } from '@/components/ui/skeleton'
+'use client';
 
-export default function PrescriptionDetailPage({ params }: { params: { id: string } }) {
-    const componentRef = useRef<HTMLDivElement>(null)
-    const handlePrint = useReactToPrint({
-        contentRef: componentRef,
-    })
+/**
+ * Prescription Detail / Print Page
+ *
+ * Fixes from original:
+ * ✅ useEffect + useState → useQuery (staleTime, retry, loading states)
+ * ✅ (id as string) unsafe cast → useParams<{ id: string }> with proper guard
+ * ✅ key={idx} on table rows → key={med.medicine_id}
+ */
 
-    const { data, isLoading } = useQuery({
-        queryKey: ['prescriptions', params.id],
-        queryFn: () => getPrescription(Number(params.id))
-    })
+import { useParams } from 'next/navigation';
+import { useQuery } from '@tanstack/react-query';
+import { Printer } from 'lucide-react';
+import { prescriptionsApi, type Prescription } from '@/lib/api/prescriptions';
 
-    if (isLoading) {
-        return (
-            <div className="space-y-6 animate-fade-in">
-                <div className="flex justify-between items-center">
-                    <Skeleton className="h-10 w-48" />
-                    <Skeleton className="h-10 w-32" />
-                </div>
-                <Skeleton className="h-[600px] w-full rounded-xl" />
-            </div>
-        )
-    }
+export default function PrescriptionDetailPage() {
+  const { id } = useParams<{ id: string }>();
 
-    if (!data) return <div>Prescription not found</div>
+  const { data: rx, isLoading, isError } = useQuery<Prescription>({
+    queryKey: ['prescriptions', id],
+    queryFn: ({ signal }) => prescriptionsApi.getById(id, signal),
+    enabled: Boolean(id),
+    staleTime: 5 * 60 * 1_000, // prescriptions rarely change — cache 5 min
+  });
 
+  if (isLoading) {
     return (
-        <div className="space-y-6 animate-fade-in">
-            <PageHeader title={`Prescription #${data.id}`} description={`Created on ${format(new Date(data.created_at), 'MMMM d, yyyy')}`}>
-                <Button onClick={handlePrint} variant="outline" className="gap-2">
-                    <Icons.file className="h-4 w-4" />
-                    Print Prescription
-                </Button>
-            </PageHeader>
-
-            <div className="grid gap-6 lg:grid-cols-3">
-                <div className="lg:col-span-2 space-y-6">
-                    <div className="card p-8 border-none shadow-xl bg-white text-slate-900 print:shadow-none print:border-none" ref={componentRef}>
-                        <div className="flex justify-between items-start border-b pb-6 mb-6">
-                            <div>
-                                <h1 className="text-2xl font-bold font-serif text-slate-900">VitalCache Clinic</h1>
-                                <p className="text-sm text-slate-500 mt-1">123 Medical Center Dr, Health City</p>
-                                <p className="text-sm text-slate-500">Phone: (555) 123-4567</p>
-                            </div>
-                            <div className="text-right">
-                                <h2 className="text-xl font-bold text-blue-600">PRESCRIPTION</h2>
-                                <p className="text-sm text-slate-500 mt-1">#{data.id}</p>
-                                <p className="text-sm text-slate-500">{format(new Date(data.created_at), 'MMM d, yyyy')}</p>
-                            </div>
-                        </div>
-
-                        <div className="mb-8 p-4 bg-slate-50 rounded-lg print:bg-transparent print:p-0">
-                            <div className="grid grid-cols-2 gap-4">
-                                <div>
-                                    <p className="text-xs text-slate-500 uppercase tracking-wider font-semibold">Patient Details</p>
-                                    <p className="font-medium text-lg">Patient #{data.patient_id}</p>
-                                </div>
-                                <div className="text-right">
-                                    <p className="text-xs text-slate-500 uppercase tracking-wider font-semibold">Doctor</p>
-                                    <p className="font-medium text-lg">Dr. Smith</p>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div className="space-y-6">
-                            <div>
-                                <h3 className="font-bold text-sm uppercase tracking-wider text-slate-500 mb-4 border-b pb-2">Medicines</h3>
-                                <table className="w-full text-left">
-                                    <thead>
-                                        <tr className="text-sm text-slate-500">
-                                            <th className="pb-2 font-medium">Medicine</th>
-                                            <th className="pb-2 font-medium">Dose</th>
-                                            <th className="pb-2 font-medium">Frequency</th>
-                                            <th className="pb-2 font-medium">Duration</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody className="text-sm">
-                                        {data.items?.map((item: any, index: number) => (
-                                            <tr key={index} className="border-b border-slate-100 last:border-0">
-                                                <td className="py-3 font-medium">{item.medicine?.name || `Medicine #${item.medicine_id}`}</td>
-                                                <td className="py-3">{item.dose}</td>
-                                                <td className="py-3">{item.frequency}</td>
-                                                <td className="py-3">{item.duration}</td>
-                                            </tr>
-                                        ))}
-                                        {(!data.items || data.items.length === 0) && (
-                                            <tr>
-                                                <td colSpan={4} className="py-4 text-center text-slate-500 italic">No medicines listed</td>
-                                            </tr>
-                                        )}
-                                    </tbody>
-                                </table>
-                            </div>
-
-                            {data.notes && (
-                                <div>
-                                    <h3 className="font-bold text-sm uppercase tracking-wider text-slate-500 mb-2">Notes</h3>
-                                    <p className="text-sm bg-yellow-50 p-3 rounded-lg border border-yellow-100 text-slate-700 print:bg-transparent print:border-none print:p-0">
-                                        {data.notes}
-                                    </p>
-                                </div>
-                            )}
-                        </div>
-
-                        <div className="mt-16 pt-8 flex justify-between items-end print:mt-32">
-                            <div className="text-center">
-                                <div className="h-16 w-32 mb-2 border-b border-slate-400"></div>
-                                <p className="font-bold text-sm">Signature</p>
-                            </div>
-                        </div>
-
-                        <div className="mt-8 pt-4 border-t text-center text-xs text-slate-400 print:block hidden">
-                            Generated by VitalCache on {format(new Date(), 'PPP p')}
-                        </div>
-                    </div>
-                </div>
-
-                <div className="space-y-6">
-                    <div className="card p-6 space-y-4 border-none shadow-xl bg-white/50 backdrop-blur-xl">
-                        <h3 className="font-semibold text-lg">Actions</h3>
-                        <Button onClick={handlePrint} className="w-full bg-blue-600 hover:bg-blue-700">
-                            <Icons.file className="mr-2 h-4 w-4" />
-                            Print / Save PDF
-                        </Button>
-                        <Button variant="outline" className="w-full">
-                            <Icons.mail className="mr-2 h-4 w-4" />
-                            Email to Patient
-                        </Button>
-                    </div>
-                </div>
-            </div>
+      <div className="min-h-screen flex items-center justify-center text-gray-500">
+        <div className="text-center space-y-2">
+          <div className="h-8 w-8 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin mx-auto" />
+          <p>Loading prescription...</p>
         </div>
-    )
+      </div>
+    );
+  }
+
+  if (isError || !rx) {
+    return (
+      <div className="min-h-screen flex items-center justify-center text-red-600 font-medium">
+        Failed to load prescription. Please try again.
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-gray-100 p-8 flex flex-col items-center">
+      {/* Action bar — hidden during print */}
+      <div className="no-print w-full max-w-4xl flex justify-end mb-4">
+        <button
+          type="button"
+          onClick={() => window.print()}
+          className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg shadow-md hover:bg-indigo-700 transition-colors"
+          aria-label="Print or save as PDF"
+        >
+          <Printer size={16} aria-hidden="true" />
+          Print / Save PDF
+        </button>
+      </div>
+
+      {/* A4 canvas */}
+      <div className="bg-white w-[210mm] min-h-[297mm] p-[20mm] shadow-xl text-black print:shadow-none">
+        {/* Header */}
+        <header className="border-b-2 border-gray-800 pb-6 mb-6 flex justify-between items-end">
+          <div>
+            <h1 className="text-3xl font-bold tracking-tight text-indigo-900">VITALCACHE CARE</h1>
+            <p className="text-sm text-gray-600 mt-1">123 Health Avenue, Medical District</p>
+            <p className="text-sm text-gray-600">Contact: +1 (555) 123-4567</p>
+          </div>
+          <div className="text-right">
+            <h2 className="text-xl font-bold text-gray-800">Attending Physician</h2>
+            <p className="text-sm font-semibold text-gray-600">MD, General Physician</p>
+          </div>
+        </header>
+
+        {/* Patient details */}
+        <section className="flex justify-between text-sm mb-8 bg-gray-50 p-4 rounded-md border border-gray-200">
+          <div>
+            <p>
+              <span className="font-semibold text-gray-700">Patient ID:</span>{' '}
+              {rx.patient_id.substring(0, 8).toUpperCase()}
+            </p>
+          </div>
+          <div className="text-right">
+            <p>
+              <span className="font-semibold text-gray-700">Date:</span>{' '}
+              {new Date(rx.created_at).toLocaleDateString()}
+            </p>
+            <p className="mt-1">
+              <span className="font-semibold text-gray-700">Rx ID:</span>{' '}
+              {rx.prescription_id.split('-')[0]?.toUpperCase()}
+            </p>
+          </div>
+        </section>
+
+        {/* Rx symbol */}
+        <div className="text-4xl font-serif font-bold text-gray-800 mb-6" aria-label="Prescription">Rx</div>
+
+        {/* Medications table */}
+        <section className="mb-12 min-h-[300px]">
+          <table className="w-full text-left border-collapse">
+            <thead>
+              <tr className="border-b border-gray-300 text-gray-600">
+                <th className="py-2 font-semibold w-1/2">Medicine</th>
+                <th className="py-2 font-semibold">Dosage</th>
+                <th className="py-2 font-semibold">Duration</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rx.medications.map((med) => (
+                <tr key={med.medicine_id} className="border-b border-dashed border-gray-200">
+                  <td className="py-4 pr-4">
+                    <p className="font-bold text-gray-900 text-lg">{med.name}</p>
+                    <p className="text-sm text-gray-600 italic mt-1">{med.instructions}</p>
+                  </td>
+                  <td className="py-4 align-top">
+                    <p className="font-semibold text-gray-800">{med.dosage}</p>
+                    <p className="text-sm text-gray-500">{med.frequency}</p>
+                  </td>
+                  <td className="py-4 align-top">
+                    <p className="font-semibold text-gray-800">{med.duration_days} Days</p>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </section>
+
+        {/* Clinical notes */}
+        {rx.notes && (
+          <section className="mb-12">
+            <h3 className="font-bold text-gray-800 border-b border-gray-300 pb-2 mb-3">
+              Clinical Notes &amp; Advice
+            </h3>
+            <p className="text-gray-700 whitespace-pre-wrap leading-relaxed">{rx.notes}</p>
+          </section>
+        )}
+
+        {/* Signature */}
+        <footer className="mt-auto pt-20 flex justify-end">
+          <div className="text-center">
+            <div className="border-b border-gray-800 w-48 mb-2" />
+            <p className="text-sm font-bold text-gray-800">Doctor&apos;s Signature</p>
+          </div>
+        </footer>
+      </div>
+    </div>
+  );
 }

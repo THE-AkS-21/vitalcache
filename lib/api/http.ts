@@ -1,141 +1,140 @@
-import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios'
-import { tokenStore } from '../auth/token-store'
+/**
+ * lib/api/http.ts — Secure Axios Instance
+ *
+ * Security contracts:
+ * ✅ withCredentials: true  → HttpOnly cookie sent on every request
+ * ✅ accessToken from Zustand memory (never localStorage)
+ * ✅ Silent refresh via /api/auth/session (Next.js proxy, not Go backend directly)
+ * ✅ Concurrent 401s queued — only one refresh in-flight at a time
+ * ✅ On refresh failure → Zustand cleared + hard redirect to /login
+ *
+ * Performance:
+ * ✅ AbortSignal forwarded to Axios — React Query cancels stale/unmounted requests
+ *    Pass signal from queryFn context: api.get('/path', { signal })
+ *
+ * Do NOT import in Server Components or Route Handlers.
+ * Use native fetch() with Authorization header there instead.
+ */
 
-const isProduction = process.env.NODE_ENV === 'production'
+import axios, { type AxiosRequestConfig, type InternalAxiosRequestConfig } from 'axios';
+import { useAuthStore } from '@/store/authStore';
+
+const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8080/api/v1';
 
 export const api = axios.create({
-  baseURL: process.env.NEXT_PUBLIC_API_URL,
+  baseURL: BASE_URL,
+  headers: { 'Content-Type': 'application/json' },
+  timeout: 15_000,
   withCredentials: true,
-  timeout: 10000, // 10 second timeout
-  headers: {
-    'Content-Type': 'application/json',
-  },
-})
+});
 
-// Request interceptor - add auth token and logging
-api.interceptors.request.use(
-  (config) => {
-    const token = tokenStore.get()
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`
-    }
-
-    // Log requests in development
-    if (!isProduction) {
-      console.log(`[API] ${config.method?.toUpperCase()} ${config.url}`, {
-        params: config.params,
-        data: config.data,
-      })
-    }
-
-    return config
-  },
-  (error) => {
-    if (!isProduction) {
-      console.error('[API] Request error:', error)
-    }
-    return Promise.reject(error)
+// ── Request: attach access token + idempotency key ────────────────────────────
+api.interceptors.request.use((config: InternalAxiosRequestConfig) => {
+  const token = useAuthStore.getState().accessToken;
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
   }
-)
 
-// Token refresh state
-let isRefreshing = false
-let refreshQueue: Array<(token: string) => void> = []
+  if (['post', 'patch', 'put'].includes(config.method?.toLowerCase() ?? '')) {
+    if (!config.headers['Idempotency-Key']) {
+      config.headers['Idempotency-Key'] = crypto.randomUUID();
+    }
+  }
 
-// Response interceptor - handle token refresh and logging
+  return config;
+});
+
+// ── Response: silent refresh on 401 ──────────────────────────────────────────
+type QueueEntry = { resolve: (token: string) => void; reject: (err: unknown) => void };
+
+let isRefreshing = false;
+let failedQueue: QueueEntry[] = [];
+
+function flushQueue(error: unknown, token: string | null): void {
+  for (const entry of failedQueue) {
+    if (error) entry.reject(error);
+    else entry.resolve(token!);
+  }
+  failedQueue = [];
+}
+
+interface ExtendedAxiosConfig extends AxiosRequestConfig {
+  _retry?: boolean;
+}
+
+interface SessionResponse {
+  access_token: string | null;
+  user: unknown;
+}
+
 api.interceptors.response.use(
-  (response) => {
-    // Log responses in development
-    if (!isProduction) {
-      console.log(`[API] ✓ ${response.config.method?.toUpperCase()} ${response.config.url}`, {
-        status: response.status,
-        data: response.data,
-      })
-    }
-    return response
-  },
-  async (error: AxiosError) => {
-    const originalRequest = error.config as InternalAxiosRequestConfig & { _retry?: boolean }
-    const status = error.response?.status
+  (res) => res,
+  async (err: unknown) => {
+    if (!axios.isAxiosError(err)) return Promise.reject(err);
 
-    // Log errors in development
-    if (!isProduction) {
-      console.error(`[API] ✗ ${originalRequest?.method?.toUpperCase()} ${originalRequest?.url}`, {
-        status,
-        error: error.response?.data,
-      })
-    }
+    // FIX 1: Check isCancel BEFORE inspecting err.response.status.
+    // Cancelled requests (aborted by React Query) have no .response, so
+    // `status` below would be `undefined`, causing them to fall through
+    // into the 401 refresh path unintentionally.
+    if (axios.isCancel(err)) return Promise.reject(err);
 
-    // Handle 401 Unauthorized - attempt token refresh
-    if (status === 401 && originalRequest && !originalRequest._retry) {
-      if (!isRefreshing) {
-        isRefreshing = true
-        originalRequest._retry = true
+    const originalRequest = err.config as ExtendedAxiosConfig | undefined;
+    if (!originalRequest) return Promise.reject(err);
 
-        try {
-          // Call refresh endpoint (uses HTTP-only cookie)
-          const response = await api.post('/api/auth/refresh', {})
-          const newToken = response.data.accessToken
+    const status = err.response?.status;
+    if (status !== 401 || originalRequest._retry) return Promise.reject(err);
 
-          // Update stored token
-          tokenStore.set(newToken)
-
-          // Resolve all queued requests with new token
-          refreshQueue.forEach((callback) => callback(newToken))
-          refreshQueue = []
-
-          // Retry original request with new token
-          originalRequest.headers.Authorization = `Bearer ${newToken}`
-          return api.request(originalRequest)
-        } catch (refreshError) {
-          // Refresh failed - clear token and redirect to login
-          tokenStore.clear()
-          refreshQueue = []
-
-          // Redirect to login if not already there
-          if (typeof window !== 'undefined' && !window.location.pathname.includes('/login')) {
-            window.location.href = '/login'
-          }
-
-          return Promise.reject(refreshError)
-        } finally {
-          isRefreshing = false
+    if (isRefreshing) {
+      // FIX 2: Queued requests receive the new token and patch their own
+      // Authorization header before re-dispatching, preventing stale token usage.
+      return new Promise<string>((resolve, reject) => {
+        failedQueue.push({ resolve, reject });
+      }).then((newToken) => {
+        if (originalRequest.headers) {
+          originalRequest.headers['Authorization'] = `Bearer ${newToken}`;
         }
-      }
-
-      // Queue the request while refresh is in progress
-      return new Promise((resolve, reject) => {
-        refreshQueue.push((token: string) => {
-          originalRequest.headers.Authorization = `Bearer ${token}`
-          api.request(originalRequest).then(resolve).catch(reject)
-        })
-      })
+        return api(originalRequest);
+      });
     }
 
-    return Promise.reject(error)
-  }
-)
+    originalRequest._retry = true;
+    isRefreshing = true;
 
-// Retry logic for network errors
-api.interceptors.response.use(undefined, async (error: AxiosError) => {
-  const config = error.config as InternalAxiosRequestConfig & { _retryCount?: number }
+    try {
+      const { data } = await axios.get<{ access_token: string }>(
+        '/api/auth/session',
+        {
+          baseURL: '/', // Force use of Next.js origin
+          withCredentials: true,
+        }
+      );
 
-  // Only retry network errors, not 4xx/5xx
-  if (!error.response && config) {
-    config._retryCount = config._retryCount || 0
-
-    if (config._retryCount < 2) {
-      config._retryCount += 1
-
-      if (!isProduction) {
-        console.log(`[API] Retrying request (${config._retryCount}/2):`, config.url)
+      if (!data.access_token) {
+        useAuthStore.getState().logout();
+        if (typeof window !== 'undefined') window.location.replace('/login');
+        throw new Error('No access token in session response');
       }
 
-      // Wait before retrying (exponential backoff)
-      await new Promise((resolve) => setTimeout(resolve, (config._retryCount || 1) * 1000))
-      return api.request(config)
+      useAuthStore.getState().setAccessToken(data.access_token);
+      flushQueue(null, data.access_token);
+
+      if (originalRequest.headers) {
+        originalRequest.headers['Authorization'] = `Bearer ${data.access_token}`;
+      }
+      return api(originalRequest);
+    } catch (refreshError) {
+      flushQueue(refreshError, null);
+      useAuthStore.getState().logout();
+      if (typeof window !== 'undefined') {
+        window.location.replace('/login');
+      }
+      return Promise.reject(refreshError);
+    } finally {
+      // FIX 3: Always reset isRefreshing in finally, not just on the happy path.
+      // Without this, any thrown error leaves the flag permanently true,
+      // causing every subsequent 401 to silently queue forever (especially
+      // visible during Next.js dev-mode hot-reloads).
+      isRefreshing = false;
     }
   }
-
-  return Promise.reject(error)
-})
+);

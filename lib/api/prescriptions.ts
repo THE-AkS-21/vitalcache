@@ -1,44 +1,80 @@
-import { api } from './http'
+import { api } from './http';
+
+export type Medication = {
+  medicine_id: string;
+  name: string;
+  dosage: string;
+  frequency: string;
+  duration_days: number;
+  instructions: string;
+};
 
 export type Prescription = {
-    id: number
-    patient_id: number
-    doctor_id: number
-    notes: string
-    file_url: string
-    created_at: string
+  id: string;
+  prescription_id: string;
+  patient_id: string;
+  doctor_id: string;
+  hospital_id: string;
+  disease_name?: string;
+  medications: Medication[];
+  notes: string;
+  status: string;
+  created_at: string;
+  updated_at?: string;
+};
+
+export interface PrescriptionListParams {
+  limit?: number;
+  offset?: number;
 }
 
-export type CreatePrescriptionInput = {
-    patient_id: number
-    notes: string
-    medicines: {
-        medicine_id: number
-        dose: string
-        duration: string
-        frequency: string
-    }[]
+export interface PaginatedPrescriptions {
+  data: Prescription[];
+  total: number;
 }
 
-export async function createPrescription(input: CreatePrescriptionInput): Promise<Prescription> {
-    const { data } = await api.post<Prescription>('/api/v1/prescriptions', input)
-    return data
-}
+export const prescriptionsApi = {
+  list: async (params: PrescriptionListParams = {}, signal?: AbortSignal): Promise<PaginatedPrescriptions> => {
+    const { data } = await api.get<PaginatedPrescriptions>(
+      '/prescriptions', {
+      params: { limit: params.limit ?? 20, offset: params.offset ?? 0 },
+      signal,
+    });
+    return data;
+  },
 
-export async function getPrescriptionHistory(
-    patientId: number,
-    params: { start?: string; end?: string; limit?: number; offset?: number }
-): Promise<{ patient_id: number; count: number; items: Prescription[] }> {
-    const { data } = await api.get<{ patient_id: number; count: number; items: Prescription[] }>(`/api/v1/patients/${patientId}/prescriptions`, { params })
-    return data
-}
+  getPatientHistory: async (
+    patientId: string,
+    limit = 20,
+    offset = 0,
+    signal?: AbortSignal
+  ): Promise<PaginatedPrescriptions> => {
+    const { data } = await api.get<PaginatedPrescriptions>(
+      `/prescriptions/patient/${patientId}`,
+      { params: { limit, offset }, signal }
+    );
+    return data;
+  },
 
-export async function getPrescription(id: number): Promise<Prescription & { items: any[] }> {
-    const { data } = await api.get<Prescription & { items: any[] }>(`/api/v1/prescriptions/${id}`)
-    return data
-}
+  // Mutations intentionally omit signal — aborting POST mid-flight causes partial writes
+  create: async (payload: {
+    patient_id: string;
+    hospital_id: string;
+    medications: Medication[];
+    notes?: string;
+  }): Promise<Prescription> => {
+    const { data } = await api.post<Prescription>('/prescriptions/', payload);
+    return data;
+  },
 
-export async function listPrescriptions(params?: { limit?: number; offset?: number }): Promise<Prescription[]> {
-    const { data } = await api.get<Prescription[]>('/api/v1/prescriptions', { params })
-    return data
-}
+  getById: async (id: string, signal?: AbortSignal): Promise<Prescription> => {
+    const { data } = await api.get<Prescription>(`/prescriptions/${id}`, { signal });
+    return data;
+  },
+};
+
+export const listPrescriptions = (params?: PrescriptionListParams, signal?: AbortSignal) =>
+  prescriptionsApi.list(params, signal);
+
+export const getPrescriptionsByPatient = (patientId: string, signal?: AbortSignal) =>
+  prescriptionsApi.getPatientHistory(patientId, 20, 0, signal);

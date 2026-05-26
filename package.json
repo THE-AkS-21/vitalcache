@@ -7,10 +7,14 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "test": "jest"
+    "test": "jest",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui",
+    "test:e2e:report": "playwright show-report"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",
+    "@react-oauth/google": "^0.13.5",
     "@tanstack/react-query": "^5.59.17",
     "axios": "^1.7.7",
     "clsx": "^2.1.1",
@@ -18,15 +22,20 @@
     "framer-motion": "^12.23.24",
     "jose": "^5.9.3",
     "lucide-react": "^0.554.0",
-    "next": "14.2.8",
+    "next": "^14.2.35",
     "react": "18.3.1",
     "react-dom": "18.3.1",
     "react-hook-form": "^7.53.0",
+    "react-intersection-observer": "^10.0.3",
     "react-to-print": "^3.2.0",
+    "recharts": "^3.8.1",
+    "sonner": "^2.0.7",
     "tailwind-merge": "^3.4.0",
-    "zod": "^3.23.8"
+    "zod": "^3.23.8",
+    "zustand": "^5.0.12"
   },
   "devDependencies": {
+    "@playwright/test": "^1.60.0",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.0",
     "@testing-library/user-event": "^14.6.1",

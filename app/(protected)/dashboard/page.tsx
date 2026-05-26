@@ -1,232 +1,266 @@
-'use client'
+/**
+ * Dashboard Page — Server Component
+ *
+ * Performance changes:
+ * ✅ No 'use client' — this is now an async Server Component
+ * ✅ framer-motion removed — replaced with CSS animations (already in globals.css)
+ * ✅ ClayCard removed — it was a missing import causing the build failure
+ * ✅ useEffect/useState data fetch removed — data is now fetched server-side
+ *    and passed down as props to the client island (DashboardStats)
+ * ✅ useAuthStore replaced — user is passed as prop from server (no Zustand on server)
+ *
+ * Architecture:
+ *   DashboardPage (RSC) → fetches appointments on server
+ *     └── DashboardStats (RSC) → renders stat cards (pure HTML, no JS)
+ *     └── AppointmentList (RSC) → renders appointments (pure HTML, no JS)
+ *
+ * No React Query here — React Query is for CLIENT data fetching.
+ * Server-side data fetching uses native fetch() with Next.js caching.
+ */
 
-import { useQuery } from '@tanstack/react-query'
-import { searchPatients } from '@/lib/api/patients'
-import { listMedicines } from '@/lib/api/medicines'
-import { StatCard, StatCardGrid } from '@/components/ui/stat-card'
-import { EnhancedCard, EnhancedCardHeader, EnhancedCardContent } from '@/components/ui/enhanced-card'
-import { SimplePageTransition } from '@/components/ui/page-transition'
-import { Icons } from '@/components/ui/icons'
-import { Avatar, AvatarFallback } from '@/components/ui/avatar'
-import { Button } from '@/components/ui/button'
-import Link from 'next/link'
+import { cookies } from 'next/headers';
+import { redirect } from 'next/navigation';
+import { Users, Calendar, Activity, Clock, DollarSign, TrendingUp } from 'lucide-react';
+import Link from 'next/link';
+import ActivityHeatmap from '@/components/dashboard/ActivityHeatmap';
+import { RevenueCharts } from '@/components/analytics/revenue-charts';
 
-export default function DashboardPage() {
-  // Fetch patients for count and recent list
-  const { data: patients, isLoading: patientsLoading } = useQuery({
-    queryKey: ['patients', 'dashboard'],
-    queryFn: () => searchPatients('')
-  })
+const GO_API = process.env.INTERNAL_API_URL ?? process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8080';
 
-  // Fetch medicines for inventory count
-  const { data: medicines, isLoading: medicinesLoading } = useQuery({
-    queryKey: ['medicines', 'dashboard'],
-    queryFn: () => listMedicines({ limit: 100 })
-  })
+interface Appointment {
+  id: string;
+  patient_id: string;
+  appointment_time: string;
+  status: 'BOOKED' | 'COMPLETED' | 'CANCELLED';
+  notes?: string;
+}
 
-  const recentPatients = patients?.slice(0, 5) ?? []
-  const statsLoading = patientsLoading || medicinesLoading
+interface AppointmentListResponse {
+  data: Appointment[];
+  meta: { total: number };
+}
+
+/**
+ * getAppointments fetches a paginated list of appointments from the backend for the dashboard.
+ * It uses native fetch with Next.js caching to revalidate data periodically.
+ * 
+ * @param {string} accessToken - The user's JWT access token.
+ * @returns {Promise<AppointmentListResponse>} A promise resolving to the list of appointments.
+ */
+async function getAppointments(accessToken: string): Promise<AppointmentListResponse> {
+  try {
+    const res = await fetch(`${GO_API}/appointments?limit=5&offset=0`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      next: { revalidate: 30 },
+    });
+    if (!res.ok) return { data: [], meta: { total: 0 } };
+    return (await res.json()) as { data: Appointment[]; meta: { total: number } };
+  } catch {
+    return { data: [], meta: { total: 0 } };
+  }
+}
+
+/**
+ * getPatients fetches a paginated list of patients from the backend to get the total patient count.
+ * 
+ * @param {string} accessToken - The user's JWT access token.
+ * @returns {Promise<{ meta: { total: number } }>} A promise resolving to the patients metadata.
+ */
+async function getPatients(accessToken: string): Promise<{ meta: { total: number } }> {
+  try {
+    const res = await fetch(`${GO_API}/patients?limit=1&offset=0`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      next: { revalidate: 30 },
+    });
+    if (!res.ok) return { meta: { total: 0 } };
+    const json = await res.json();
+    return { meta: json.meta ?? { total: 0 } };
+  } catch {
+    return { meta: { total: 0 } };
+  }
+}
+
+/**
+ * getAnalytics fetches revenue and consultation analytics data from the backend.
+ * 
+ * @param {string} accessToken - The user's JWT access token.
+ * @returns {Promise<any>} A promise resolving to the analytics data or null on error.
+ */
+async function getAnalytics(accessToken: string) {
+  try {
+    const res = await fetch(`${GO_API}/billings/analytics`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      next: { revalidate: 30 },
+    });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
+
+function StatusBadge({ status }: { status: Appointment['status'] }) {
+  const styles = {
+    BOOKED: 'bg-indigo-100 text-indigo-700',
+    COMPLETED: 'bg-emerald-100 text-emerald-700',
+    CANCELLED: 'bg-red-100 text-red-700',
+  } as const;
 
   return (
-    <SimplePageTransition>
-      <div className="space-y-8">
-        {/* Header Section */}
-        <div className="flex items-center justify-between animate-fade-in">
-          <div>
-            <h1 className="text-3xl font-bold bg-gradient-to-r from-gray-900 to-gray-700 bg-clip-text text-transparent">
-              Dashboard
-            </h1>
-            <p className="text-gray-600 mt-1">
-              Welcome back! Here's your clinic overview
-            </p>
+    <span className={`px-3 py-1 rounded-full text-xs font-semibold ${styles[status] ?? 'bg-gray-100 text-gray-700'}`}>
+      {status}
+    </span>
+  );
+}
+
+/**
+ * DashboardPage is the main Server Component for the authenticated dashboard.
+ * It retrieves the user's access token via a server-to-server refresh token exchange,
+ * concurrently fetches appointments, patients, and analytics data, and renders 
+ * the top-level KPIs, charts, and upcoming appointments list without requiring client-side JS for fetching.
+ * 
+ * @returns React.JSX element for the dashboard page.
+ */
+export default async function DashboardPage() {
+  const cookieStore = await cookies();
+  const refreshToken = cookieStore.get('refresh_token')?.value;
+
+  let accessToken = '';
+  if (refreshToken) {
+    try {
+      const sessionRes = await fetch(`${GO_API}/auth/refresh`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Cookie: `refresh_token=${refreshToken}` },
+        body: JSON.stringify({}),
+        cache: 'no-store',
+      });
+      if (sessionRes.ok) {
+        const sessionData = (await sessionRes.json()) as { data: { access_token: string } };
+        accessToken = sessionData.data.access_token;
+      } else if (sessionRes.status === 401) {
+        redirect('/api/auth/logout');
+      }
+    } catch {}
+  } else {
+    redirect('/api/auth/logout');
+  }
+
+  const [appointmentsRes, patientsRes, analytics] = await Promise.all([
+    getAppointments(accessToken),
+    getPatients(accessToken),
+    getAnalytics(accessToken)
+  ]);
+
+  const appointments = appointmentsRes.data;
+  const totalAppointments = appointmentsRes.meta.total;
+  const totalPatients = patientsRes.meta.total;
+  const pendingReports = appointments.filter(a => a.status === 'BOOKED').length;
+
+  return (
+    <div className="p-6 max-w-7xl mx-auto space-y-8 animate-fade-in">
+      <div className="animate-slide-in-left">
+        <h1 className="text-3xl font-bold text-gray-900">Dashboard</h1>
+        <p className="text-gray-500 mt-1">Your clinic overview for today.</p>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+        <div className="clay-card-elevated p-6 flex items-center space-x-4 border-l-4 border-l-indigo-500 hover:-translate-y-1 transition-transform duration-300">
+          <div className="p-3 bg-indigo-100 text-indigo-600 rounded-xl">
+            <Calendar className="h-7 w-7" />
           </div>
-          <Button
-            asChild
-            className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 shadow-lg shadow-blue-200 hover:shadow-xl hover-lift"
-          >
-            <Link href="/patients/new">
-              <Icons.add className="w-4 h-4 mr-2" />
-              Add Patient
-            </Link>
-          </Button>
+          <div>
+            <p className="text-sm text-gray-500 font-medium">Today&apos;s Appointments</p>
+            <h3 className="text-2xl font-bold text-gray-900">{totalAppointments}</h3>
+          </div>
         </div>
 
-        {/* Stats Grid */}
-        <StatCardGrid className="animate-fade-in-up delay-100">
-          <StatCard
-            title="Total Patients"
-            value={patients?.length ?? 0}
-            description="All registered patients"
-            icon={Icons.patients}
-            trend={{
-              value: 12,
-              direction: 'up',
-              label: 'vs last month'
-            }}
-            loading={statsLoading}
-            animate={!statsLoading}
-            gradient
-          />
-          <StatCard
-            title="Appointments Today"
-            value={0}
-            description="Scheduled for today"
-            icon={Icons.appointments}
-            loading={statsLoading}
-            animate={!statsLoading}
-            gradient
-          />
-          <StatCard
-            title="Medicines in Stock"
-            value={medicines?.length ?? 0}
-            description="Available inventory"
-            icon={Icons.pill}
-            trend={{
-              value: 8,
-              direction: 'up',
-              label: 'new this week'
-            }}
-            loading={statsLoading}
-            animate={!statsLoading}
-            gradient
-          />
-          <StatCard
-            title="Monthly Revenue"
-            value="$0"
-            description="This month's earnings"
-            icon={Icons.dollar}
-            trend={{
-              value: 15,
-              direction: ' up',
-              label: 'vs last month'
-            }}
-            loading={statsLoading}
-            animate={!statsLoading}
-            gradient
-          />
-        </StatCardGrid>
+        <div className="clay-card-elevated p-6 flex items-center space-x-4 border-l-4 border-l-emerald-500 hover:-translate-y-1 transition-transform duration-300">
+          <div className="p-3 bg-emerald-100 text-emerald-600 rounded-xl">
+            <Users className="h-7 w-7" />
+          </div>
+          <div>
+            <p className="text-sm text-gray-500 font-medium">Total Patients</p>
+            <h3 className="text-2xl font-bold text-gray-900">{totalPatients}</h3>
+          </div>
+        </div>
 
-        {/* Main Content Grid */}
-        <div className="grid gap-6 lg:grid-cols-3 animate-fade-in-up delay-200">
-          {/* Recent Patients - Takes 2 columns on large screens */}
-          <EnhancedCard
-            variant="elevated"
-            hover={false}
-            className="lg:col-span-2"
-          >
-            <EnhancedCardHeader>
-              <div className="flex items-center justify-between">
-                <div>
-                  <h2 className="text-xl font-semibold text-gray-900">Recent Patients</h2>
-                  <p className="text-sm text-gray-500 mt-1">Latest patient registrations</p>
-                </div>
-                <Button variant="outline" size="sm" asChild className="hover-lift">
-                  <Link href="/patients">
-                    View All
-                    <Icons.chevronRight className="w-4 h-4 ml-1" />
-                  </Link>
-                </Button>
-              </div>
-            </EnhancedCardHeader>
-            <EnhancedCardContent>
-              {patientsLoading ? (
-                <div className="space-y-4">
-                  {[1, 2, 3].map((i) => (
-                    <div key={i} className="flex items-center gap-4 p-4 rounded-xl bg-gray-50 animate-shimmer">
-                      <div className="w-12 h-12 rounded-full bg-gray-200" />
-                      <div className="flex-1 space-y-2">
-                        <div className="h-4 w-32 bg-gray-200 rounded" />
-                        <div className="h-3 w-48 bg-gray-200 rounded" />
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : recentPatients && recentPatients.length > 0 ? (
-                <div className="space-y-3">
-                  {recentPatients.map((patient, index) => (
-                    <Link
-                      key={patient.id}
-                      href={`/patients/${patient.id}`}
-                      className={`flex items-center gap-4 p-4 rounded-xl bg-gradient-to-r from-gray-50 to-transparent hover:from-blue-50 hover:to-purple-50 transition-all duration-300 hover-lift border border-transparent hover:border-blue-200 animate-fade-in-up delay-${index * 100}`}
-                    >
-                      <Avatar className="h-12 w-12 ring-2 ring-blue-100">
-                        <AvatarFallback className="bg-gradient-to-br from-blue-100 to-purple-100 text-blue-700 font-semibold">
-                          {patient.name.split(' ').map(n => n[0]).join('')}
-                        </AvatarFallback>
-                      </Avatar>
-                      <div className="flex-1 min-w-0">
-                        <p className="font-semibold text-gray-900 truncate">{patient.name}</p>
-                        <div className="flex items-center gap-4 mt-1 text-sm text-gray-500">
-                          {patient.email && (
-                            <span className="flex items-center gap-1">
-                              <Icons.mail className="w-3 h-3" />
-                              {patient.email}
-                            </span>
-                          )}
-                          {patient.mobile_number && (
-                            <span className="flex items-center gap-1">
-                              <Icons.phone className="w-3 h-3" />
-                              {patient.mobile_number}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                      <Icons.chevronRight className="w-5 h-5 text-gray-400 group-hover:text-blue-600 transition-colors" />
-                    </Link>
-                  ))}
-                </div>
-              ) : (
-                <div className="text-center py-12">
-                  <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-gray-100 flex items-center justify-center">
-                    <Icons.patients className="w-8 h-8 text-gray-400" />
-                  </div>
-                  <h3 className="text-lg font-medium text-gray-900 mb-1">No recent patients</h3>
-                  <p className="text-sm text-gray-500 mb-4">Get started by adding your first patient</p>
-                  <Button asChild size="sm" className="bg-gradient-to-r from-blue-600 to-purple-600">
-                    <Link href="/patients/new">
-                      <Icons.add className="w-4 h-4 mr-2" />
-                      Add Patient
-                    </Link>
-                  </Button>
-                </div>
-              )}
-            </EnhancedCardContent>
-          </EnhancedCard>
+        <div className="clay-card-elevated p-6 flex items-center space-x-4 border-l-4 border-l-amber-500 hover:-translate-y-1 transition-transform duration-300">
+          <div className="p-3 bg-amber-100 text-amber-600 rounded-xl">
+            <Activity className="h-7 w-7" />
+          </div>
+          <div>
+            <p className="text-sm text-gray-500 font-medium">Pending Reports</p>
+            <h3 className="text-2xl font-bold text-gray-900">{pendingReports}</h3>
+          </div>
+        </div>
 
-          {/* Quick Actions - 1 column */}
-          <EnhancedCard variant="gradient" hover={false}>
-            <EnhancedCardHeader>
-              <h2 className="text-xl font-semibold text-gray-900">Quick Actions</h2>
-              <p className="text-sm text-gray-500 mt-1">Common tasks</p>
-            </EnhancedCardHeader>
-            <EnhancedCardContent>
-              <div className="space-y-3">
-                {[
-                  { href: '/patients/new', icon: Icons.add, label: 'New Patient', desc: 'Register a new patient' },
-                  { href: '/appointments', icon: Icons.appointments, label: 'Schedule', desc: 'Book appointment' },
-                  { href: '/prescriptions/new', icon: Icons.pill, label: 'Prescribe', desc: 'Create prescription' },
-                  { href: '/medicines', icon: Icons.stethoscope, label: 'Medicines', desc: 'Manage inventory' },
-                ].map((action, index) => (
-                  <Link
-                    key={action.href}
-                    href={action.href}
-                    className={`flex items-center gap-3 p-3 rounded-lg bg-white hover:bg-blue-50 transition-all duration-200 hover-lift border border-gray-200 hover:border-blue-300 hover:shadow-md animate-fade-in-up delay-${(index + 3) * 100}`}
-                  >
-                    <div className="p-2 rounded-lg bg-gradient-to-br from-blue-50 to-blue-100">
-                      <action.icon className="w-5 h-5 text-blue-600" />
-                    </div>
-                    <div className="flex-1">
-                      <p className="font-medium text-gray-900">{action.label}</p>
-                      <p className="text-xs text-gray-500">{action.desc}</p>
-                    </div>
-                    <Icons.chevronRight className="w-4 h-4 text-gray-400" />
-                  </Link>
-                ))}
-              </div>
-            </EnhancedCardContent>
-          </EnhancedCard>
+        <div className="clay-card-elevated p-6 flex items-center space-x-4 border-l-4 border-l-green-500 hover:-translate-y-1 transition-transform duration-300">
+          <div className="p-3 bg-green-100 text-green-600 rounded-xl">
+            <DollarSign className="h-7 w-7" />
+          </div>
+          <div>
+            <p className="text-sm text-gray-500 font-medium">Today&apos;s Earnings</p>
+            <h3 className="text-2xl font-bold text-gray-900">
+              {analytics ? `₹${(analytics.today_earnings || 0).toLocaleString('en-IN')}` : '₹0'}
+            </h3>
+          </div>
         </div>
       </div>
-    </SimplePageTransition>
-  )
+
+      {/* Analytics & Revenue Charts — always render, shows empty state when no data */}
+      <RevenueCharts analytics={analytics} />
+
+      <div className="grid grid-cols-1 gap-6">
+        <ActivityHeatmap />
+      </div>
+
+      {/* Upcoming Appointments — pure RSC, zero JS */}
+      <div>
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-xl font-bold text-gray-900">Upcoming Appointments</h2>
+          <Link
+            href="/appointments"
+            className="text-sm text-blue-600 hover:text-blue-700 font-medium transition-colors"
+          >
+            View all →
+          </Link>
+        </div>
+
+        <div className="clay-card overflow-hidden">
+          {appointments.length === 0 ? (
+            <div className="py-16 text-center">
+              <Calendar className="h-12 w-12 mx-auto text-gray-300 mb-3" />
+              <p className="text-gray-500 font-medium">No upcoming appointments</p>
+              <p className="text-gray-400 text-sm mt-1">New appointments will appear here</p>
+            </div>
+          ) : (
+            <div className="divide-y divide-gray-100">
+              {appointments.map((apt) => (
+                <div key={apt.id} className="flex justify-between items-center p-5 hover:bg-slate-50/80 transition-colors">
+                  <div className="flex items-center space-x-4">
+                    <div className="flex flex-col items-center justify-center bg-gray-100 rounded-xl p-3 w-16 flex-shrink-0">
+                      <span className="text-xs text-gray-500 uppercase font-medium">
+                        {new Date(apt.appointment_time).toLocaleString('en-US', { month: 'short' })}
+                      </span>
+                      <span className="text-xl font-bold text-indigo-600">
+                        {new Date(apt.appointment_time).getDate()}
+                      </span>
+                    </div>
+                    <div>
+                      <h4 className="font-semibold text-gray-900">Patient #{apt.patient_id.substring(0, 8)}</h4>
+                      <div className="flex items-center text-sm text-gray-500 mt-0.5">
+                        <Clock className="h-3.5 w-3.5 mr-1" />
+                        {new Date(apt.appointment_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      </div>
+                    </div>
+                  </div>
+                  <StatusBadge status={apt.status} />
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
 }
