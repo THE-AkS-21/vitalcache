@@ -1,16 +1,18 @@
 'use client'
 
 import type { AxiosError } from 'axios'
-import { useState, useEffect } from 'react'
-import { useRouter } from 'next/navigation'
+import { useState, useEffect, Suspense } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { registerSchema, type RegisterInput } from '@/lib/validators'
-import { authApi } from '@/lib/api'
+import { authApi } from '@/lib/api/auth'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Icons } from '@/components/ui/icons'
 import Link from 'next/link'
+import { GoogleLogin } from '@react-oauth/google'
+import { useAuthStore } from '@/store/authStore'
 
 type RegisterFormData = RegisterInput
 
@@ -43,12 +45,18 @@ function FloatingParticles() {
     )
 }
 
-export default function RegisterPage() {
+function RegisterPageContent() {
     const router = useRouter()
+    const searchParams = useSearchParams()
+    const inviteToken = searchParams.get('invite')
+
     const [error, setError] = useState<string | null>(null)
     const [showPassword, setShowPassword] = useState(false)
     const [cursorPosition, setCursorPosition] = useState({ x: 0, y: 0 })
     const [registerSuccess, setRegisterSuccess] = useState(false)
+
+    const setAccessToken = useAuthStore((state) => state.setAccessToken)
+    const setUser = useAuthStore((state) => state.setUser)
 
     const {
         register,
@@ -57,7 +65,8 @@ export default function RegisterPage() {
     } = useForm<RegisterFormData>({
         resolver: zodResolver(registerSchema),
         defaultValues: {
-            role: 'DOCTOR' // Default to DOCTOR as requested
+            role: inviteToken ? 'DOCTOR' : 'PATIENT',
+            invite_token: inviteToken || undefined
         }
     })
 
@@ -84,6 +93,26 @@ export default function RegisterPage() {
             setError(
                 axiosErr?.response?.data?.error?.message ??
                 'Registration failed. Please try again.'
+            )
+        }
+    }
+
+    const handleGoogleSuccess = async (credentialResponse: any) => {
+        setError(null)
+        try {
+            if (!credentialResponse.credential) throw new Error('No credential received');
+            const payload = await authApi.googleLogin(credentialResponse.credential);
+            setAccessToken(payload.access_token);
+            if (payload.user) setUser(payload.user);
+            setRegisterSuccess(true);
+            setTimeout(() => {
+                router.replace('/dashboard')
+            }, 800)
+        } catch (err: unknown) {
+            const axiosErr = err as AxiosError<{ error?: { message?: string } }>
+            setError(
+                axiosErr?.response?.data?.error?.message ??
+                'Google Login failed. Please try again.'
             )
         }
     }
@@ -222,23 +251,25 @@ export default function RegisterPage() {
                                         {errors.email && <p className="text-red-500 text-xs mt-1 ml-1 animate-fade-in">{errors.email.message}</p>}
                                     </div>
 
-                                    <div className="space-y-1">
-                                        <label className="text-sm font-medium text-gray-700 ml-1">Role</label>
-                                        <div className="relative">
-                                            <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-                                                <Icons.patients className="h-5 w-5 text-gray-400" />
+                                    {!inviteToken && (
+                                        <div className="space-y-1">
+                                            <label className="text-sm font-medium text-gray-700 ml-1">Role</label>
+                                            <div className="relative">
+                                                <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                                                    <Icons.patients className="h-5 w-5 text-gray-400" />
+                                                </div>
+                                                <select
+                                                    id="role"
+                                                    {...register('role')}
+                                                    className={`h-12 w-full pl-11 rounded-md bg-gray-50/50 border border-gray-200 text-gray-900 focus:bg-white focus:ring-2 focus:ring-blue-500/20 transition-all ${errors.role ? 'border-red-500 focus:border-red-500 focus:ring-red-500/20' : ''}`}
+                                                >
+                                                    <option value="PATIENT">Patient</option>
+                                                    <option value="DOCTOR">Doctor</option>
+                                                </select>
                                             </div>
-                                            <select
-                                                id="role"
-                                                {...register('role')}
-                                                className={`h-12 w-full pl-11 rounded-md bg-gray-50/50 border border-gray-200 text-gray-900 focus:bg-white focus:ring-2 focus:ring-blue-500/20 transition-all ${errors.role ? 'border-red-500 focus:border-red-500 focus:ring-red-500/20' : ''}`}
-                                            >
-                                                <option value="DOCTOR">Doctor</option>
-                                                <option value="PATIENT">Patient</option>
-                                            </select>
+                                            {errors.role && <p className="text-red-500 text-xs mt-1 ml-1 animate-fade-in">{errors.role.message}</p>}
                                         </div>
-                                        {errors.role && <p className="text-red-500 text-xs mt-1 ml-1 animate-fade-in">{errors.role.message}</p>}
-                                    </div>
+                                    )}
 
                                     <div className="space-y-1">
                                         <label className="text-sm font-medium text-gray-700 ml-1">Password</label>
@@ -282,6 +313,26 @@ export default function RegisterPage() {
                                             'Sign Up'
                                         )}
                                     </Button>
+
+                                    <div className="relative my-6">
+                                        <div className="absolute inset-0 flex items-center">
+                                            <div className="w-full border-t border-gray-200"></div>
+                                        </div>
+                                        <div className="relative flex justify-center text-sm">
+                                            <span className="px-2 bg-white/80 text-gray-500">Or continue with</span>
+                                        </div>
+                                    </div>
+
+                                    <div className="flex justify-center mt-4">
+                                        <GoogleLogin
+                                            onSuccess={handleGoogleSuccess}
+                                            onError={() => setError('Google signup failed')}
+                                            theme="outline"
+                                            size="large"
+                                            text="signup_with"
+                                            shape="rectangular"
+                                        />
+                                    </div>
                                 </>
                             )}
                         </form>
@@ -296,5 +347,13 @@ export default function RegisterPage() {
                 </div>
             </div>
         </div>
+    )
+}
+
+export default function RegisterPage() {
+    return (
+        <Suspense fallback={<div className="min-h-screen flex items-center justify-center bg-gray-50">Loading...</div>}>
+            <RegisterPageContent />
+        </Suspense>
     )
 }

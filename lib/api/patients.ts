@@ -36,7 +36,7 @@ export interface CreatePatientPayload {
 
 export const patientsApi = {
   list: async (params: PatientListParams = {}, signal?: AbortSignal): Promise<Patient[]> => {
-    const { data } = await api.get<{ data: Patient[]; total: number }>('/patients/', {
+    const { data } = await api.get<{ data: Patient[]; total: number }>('/patients', {
       params: { limit: params.limit ?? 20, offset: params.offset ?? 0 },
       signal,
     });
@@ -76,6 +76,6 @@ export async function getPrescriptionHistory(
 }
 
 export async function createPatient(payload: CreatePatientPayload): Promise<Patient> {
-  const { data } = await api.post<{ data: Patient }>('/patients/', payload);
+  const { data } = await api.post<{ data: Patient }>('/patients', payload);
   return data.data;
 }

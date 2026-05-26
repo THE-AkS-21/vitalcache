@@ -53,8 +53,14 @@ export default function SessionProvider({ children }: SessionProviderProps) {
         const data = (await res.json()) as SessionResponse;
 
         if (!cancelled) {
-          if (data.access_token) setAccessToken(data.access_token);
-          if (data.user) setUser(data.user);
+          if (data.access_token && data.user) {
+            setAccessToken(data.access_token);
+            setUser(data.user);
+          } else {
+            // Force logout if we have no valid token
+            useAuthStore.getState().logout();
+            window.location.href = '/login';
+          }
         }
       } catch {
         // Network error — leave Zustand as-is (null).

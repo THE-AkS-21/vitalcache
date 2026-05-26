@@ -22,9 +22,8 @@ export default function SettingsPage() {
                 <div className="space-y-6">
                     <div className="card p-6 space-y-6 border-none shadow-xl bg-white/50 backdrop-blur-xl">
                         <div className="flex items-center gap-4">
-                            <Avatar className="h-20 w-20 border-4 border-white shadow-lg">
-                                <AvatarImage src="https://avatar.vercel.sh/dr-smith.png" />
-                                <AvatarFallback>DS</AvatarFallback>
+                            <Avatar className="h-20 w-20 border-4 border-white shadow-lg bg-blue-50 flex items-center justify-center">
+                                <Icons.user className="h-10 w-10 text-blue-500" />
                             </Avatar>
                             <div>
                                 <Button variant="outline" size="sm">Change Avatar</Button>
@@ -79,13 +78,60 @@ export default function SettingsPage() {
                     </div>
 
                     <div className="card p-6 space-y-6 border-none shadow-xl bg-white/50 backdrop-blur-xl">
+                        <h3 className="font-semibold text-lg">Security</h3>
+                        <div className="space-y-4">
+                            <div className="grid gap-2">
+                                <label className="text-sm font-medium">New Password</label>
+                                <Input type="password" placeholder="Enter new password" className="bg-white/50" />
+                            </div>
+                            <div className="grid gap-2">
+                                <label className="text-sm font-medium">Confirm Password</label>
+                                <Input type="password" placeholder="Confirm new password" className="bg-white/50" />
+                            </div>
+                            <Button variant="outline" size="sm" onClick={() => window.location.href = '#'}>
+                                Update Password
+                            </Button>
+                        </div>
+                    </div>
+
+                    <div className="card p-6 space-y-6 border-none shadow-xl bg-white/50 backdrop-blur-xl">
+                        <h3 className="font-semibold text-lg">Hospital & Clinics</h3>
+                        <div className="space-y-4">
+                            <div className="flex items-center justify-between p-4 rounded-xl border bg-white/50">
+                                <div className="flex items-center gap-3">
+                                    <div className="p-2 rounded-lg bg-indigo-100">
+                                        <Icons.file className="h-5 w-5 text-indigo-500" />
+                                    </div>
+                                    <div>
+                                        <p className="font-medium">Report Templates</p>
+                                        <p className="text-xs text-muted-foreground">Customize PDF printouts</p>
+                                    </div>
+                                </div>
+                                <Button variant="outline" size="sm" onClick={() => window.location.href = '/settings/report-template'}>
+                                    Edit Format
+                                </Button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="card p-6 space-y-6 border-none shadow-xl bg-white/50 backdrop-blur-xl">
                         <h3 className="font-semibold text-lg text-red-600">Danger Zone</h3>
                         <p className="text-sm text-muted-foreground">
-                            Irreversible actions regarding your account.
+                            Account actions and active sessions.
                         </p>
-                        <Button variant="outline" className="text-red-600 border-red-200 hover:bg-red-50">
-                            Delete Account
-                        </Button>
+                        <div className="flex gap-4">
+                            <Button variant="outline" className="text-red-600 border-red-200 hover:bg-red-50" onClick={() => {
+                                // Clear session
+                                document.cookie = 'refresh_token=; Max-Age=0; path=/';
+                                window.location.href = '/login';
+                            }}>
+                                <Icons.logout className="h-4 w-4 mr-2" />
+                                Log Out
+                            </Button>
+                            <Button variant="outline" className="text-red-600 border-red-200 hover:bg-red-50">
+                                Delete Account
+                            </Button>
+                        </div>
                     </div>
                 </div>
             </div>

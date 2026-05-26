@@ -30,8 +30,11 @@ function makeQueryClient(): QueryClient {
         staleTime: 60 * 1_000,
         // Keep cached data for 5 minutes after component unmounts
         gcTime: 5 * 60 * 1_000,
-        // Only retry once on failure — faster error feedback
-        retry: 1,
+        // Only retry once on failure, but never on 401 Unauthorized
+        retry: (failureCount, error: any) => {
+          if (error?.response?.status === 401) return false;
+          return failureCount < 1;
+        },
         // Do NOT refetch when window regains focus — use explicit invalidation instead
         refetchOnWindowFocus: false,
         // Do NOT refetch when the component reconnects after going offline

@@ -87,9 +87,15 @@ export default function AppointmentsPage() {
                                             <p className="text-sm text-gray-500">{appointment.type}</p>
                                         </div>
                                     </div>
-                                    <div className="flex items-center gap-2 text-sm text-gray-500">
-                                        <Icons.clock className="h-4 w-4" />
-                                        {appointment.time}
+                                    <div className="flex flex-col items-end gap-2">
+                                        <div className="flex items-center gap-2 text-sm text-gray-500">
+                                            <Icons.clock className="h-4 w-4" />
+                                            {appointment.time}
+                                        </div>
+                                        <div className="flex gap-2">
+                                            <Button variant="outline" size="sm" onClick={() => window.location.href = `/appointments/${appointment.id}/treatment`}>Treatment</Button>
+                                            <Button variant="destructive" size="sm">Cancel</Button>
+                                        </div>
                                     </div>
                                 </div>
                             ))}

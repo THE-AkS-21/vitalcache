@@ -99,6 +99,7 @@ export const registerSchema = z.object({
   password: z.string().min(8, 'Password must be at least 8 characters'),
   phone_number: z.string().optional(),
   role: z.enum(['DOCTOR', 'PATIENT'], { required_error: 'Role is required' }),
+  invite_token: z.string().optional(),
 });
 
 export type RegisterInput = z.infer<typeof registerSchema>;

@@ -46,4 +46,14 @@ export const authApi = {
     // withCredentials is already set on the `api` instance — cookie is sent automatically
     await api.post('/auth/logout');
   },
+
+  /**
+   * Google Login
+   */
+  googleLogin: async (token: string) => {
+    const { data } = await api.post<{
+      data: { access_token: string; user?: UserProfile };
+    }>('/auth/google', { token });
+    return data.data; // { access_token, user }
+  },
 };

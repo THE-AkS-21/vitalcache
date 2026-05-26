@@ -19,22 +19,32 @@ export interface MedicineListParams {
   q?: string;
 }
 
+export interface PaginatedMedicines {
+  data: Medicine[];
+  total: number;
+}
+
 export const medicinesApi = {
-  list: async (params: MedicineListParams = {}, signal?: AbortSignal): Promise<Medicine[]> => {
-    const { data } = await api.get<{ data: Medicine[]; total: number }>('/medicines/', {
-      params: { limit: params.limit ?? 50, offset: params.offset ?? 0, q: params.q },
+  list: async (params: MedicineListParams = {}, signal?: AbortSignal): Promise<PaginatedMedicines> => {
+    const { data } = await api.get<PaginatedMedicines>('/medicines', {
+      params: { limit: params.limit ?? 20, offset: params.offset ?? 0, q: params.q },
       signal,
     });
-    return data.data;
+    return data;
   },
 
-  search: async (query: string, limit = 50, signal?: AbortSignal): Promise<Medicine[]> => {
-    const { data } = await api.get<{ data: Medicine[]; total: number }>('/medicines/search', {
-      params: { q: query, limit },
+  search: async (query: string, limit = 20, offset = 0, signal?: AbortSignal): Promise<PaginatedMedicines> => {
+    const { data } = await api.get<PaginatedMedicines>('/medicines/search', {
+      params: { q: query, limit, offset },
       signal,
     });
-    return data.data;
+    return data;
   },
+
+  create: async (medicine: { name: string; generic_name?: string; manufacturer?: string; tags?: string[] }): Promise<Medicine> => {
+    const { data } = await api.post<Medicine>('/medicines/', medicine);
+    return data;
+  }
 };
 
 export const listMedicines = (params?: MedicineListParams, signal?: AbortSignal) =>

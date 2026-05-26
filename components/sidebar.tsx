@@ -17,6 +17,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
 import { Icons } from '@/components/ui/icons';
+import { useAuthStore } from '@/store/authStore';
 
 type IconKey = keyof typeof Icons;
 
@@ -28,18 +29,21 @@ interface SidebarItem {
 
 const sidebarItems: SidebarItem[] = [
   { title: 'Dashboard',     href: '/dashboard',     icon: 'dashboard' },
-  { title: 'Patients',      href: '/patients',      icon: 'patients' },
   { title: 'Appointments',  href: '/appointments',  icon: 'appointments' },
   { title: 'Prescriptions', href: '/prescriptions', icon: 'pill' },
+  { title: 'Medicines',     href: '/medicines',     icon: 'pill' },
   { title: 'Billing',       href: '/billing',       icon: 'billing' },
   { title: 'Settings',      href: '/settings',      icon: 'settings' },
+  { title: 'Patients',      href: '/patients',      icon: 'patients' },
 ];
 
 export function Sidebar() {
   const pathname = usePathname();
 
+  const { user } = useAuthStore();
+
   return (
-    <div className="hidden border-r bg-gray-100/40 lg:block dark:bg-gray-800/40 w-64 min-h-screen flex-col">
+    <div className="hidden border-r bg-gray-100/40 lg:flex dark:bg-gray-800/40 w-64 h-screen flex-col sticky top-0">
       {/* Logo */}
       <div className="flex h-14 items-center border-b px-6">
         <Link className="flex items-center gap-2 font-semibold" href="/dashboard">
@@ -54,6 +58,11 @@ export function Sidebar() {
           {sidebarItems.map((item) => {
             const Icon = Icons[item.icon];
             const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`);
+            
+            // Hide Patients page for everyone except Godfather and Developer
+            if (item.title === 'Patients' && user?.role !== 'GodFather' && user?.role !== 'Developer') {
+              return null;
+            }
 
             return (
               <Link
@@ -74,20 +83,46 @@ export function Sidebar() {
               </Link>
             );
           })}
+
+          {user && (user.role === 'Developer' || user.role === 'GodFather' || user.role === 'Admin') && (
+            <Link
+              href="/settings/developer"
+              className={cn(
+                'flex items-center gap-3 rounded-lg px-3 py-2 transition-all',
+                'hover:text-gray-900 dark:hover:text-gray-50',
+                pathname === '/settings/developer' || pathname.startsWith('/settings/developer/')
+                  ? 'bg-gray-100 text-gray-900 dark:bg-gray-800 dark:text-gray-50'
+                  : 'text-gray-500 dark:text-gray-400'
+              )}
+            >
+              <Icons.settings className="h-4 w-4 flex-shrink-0" aria-hidden="true" />
+              Invite Users
+            </Link>
+          )}
         </nav>
       </div>
 
-      {/* User info footer */}
-      <div className="mt-auto p-4 border-t">
-        <div className="flex items-center gap-3 px-3 py-2">
-          <div className="h-8 w-8 rounded-full bg-gray-200 flex items-center justify-center flex-shrink-0">
-            <Icons.user className="h-4 w-4 text-gray-500" aria-hidden="true" />
+      {/* User info footer & Profile Link */}
+      <div className="mt-auto border-t p-2">
+        <Link
+          href="/profile"
+          className={cn(
+            'flex items-center gap-3 rounded-lg px-3 py-2 transition-all hover:bg-gray-200 dark:hover:bg-gray-700',
+            pathname === '/profile' ? 'bg-gray-200 dark:bg-gray-700' : ''
+          )}
+        >
+          <div className="h-8 w-8 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center flex-shrink-0 font-bold uppercase">
+            {user?.first_name?.[0] ?? <Icons.user className="h-4 w-4" aria-hidden="true" />}
           </div>
-          <div className="flex flex-col min-w-0">
-            <span className="text-sm font-medium truncate">Dr. Smith</span>
-            <span className="text-xs text-gray-500 truncate">Admin</span>
+          <div className="flex flex-col min-w-0 flex-1">
+            <span className="text-sm font-medium truncate text-gray-900 dark:text-white">
+              {user ? `${user.first_name} ${user.last_name}` : 'Loading...'}
+            </span>
+            <span className="text-xs text-gray-500 truncate capitalize">
+              {user?.designation ?? user?.role ?? ''}
+            </span>
           </div>
-        </div>
+        </Link>
       </div>
     </div>
   );

@@ -99,7 +99,7 @@ export async function GET(req: Request): Promise<NextResponse> {
 
   try {
     // Forward the HttpOnly cookie to the Go backend
-    const refreshRes = await fetch(`${GO_API}/api/v1/auth/refresh`, {
+    const refreshRes = await fetch(`${GO_API}/auth/refresh`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -111,15 +111,17 @@ export async function GET(req: Request): Promise<NextResponse> {
     });
 
     if (!refreshRes.ok) {
-      // Cookie is expired/revoked — tell client to clear Zustand and go to /login
-      return NextResponse.json({ user: null, access_token: null }, { status: 200 });
+      // Cookie is expired/revoked — clear it and tell client to clear Zustand and go to /login
+      const res = NextResponse.json({ user: null, access_token: null }, { status: 200 });
+      res.cookies.delete('refresh_token');
+      return res;
     }
 
     const refreshData = (await refreshRes.json()) as GoRefreshResponse;
     const newAccessToken = refreshData.data.access_token;
 
     // Fetch user profile using the fresh access token
-    const profileRes = await fetch(`${GO_API}/api/v1/profiles/me`, {
+    const profileRes = await fetch(`${GO_API}/profiles/me`, {
       headers: {
         Authorization: `Bearer ${newAccessToken}`,
         'Content-Type': 'application/json',
@@ -128,7 +130,9 @@ export async function GET(req: Request): Promise<NextResponse> {
     });
 
     if (!profileRes.ok) {
-      return NextResponse.json({ user: null, access_token: null }, { status: 200 });
+      const res = NextResponse.json({ user: null, access_token: null }, { status: 200 });
+      res.cookies.delete('refresh_token');
+      return res;
     }
 
     const profileData = (await profileRes.json()) as GoProfileResponse;

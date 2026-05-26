@@ -109,7 +109,11 @@ api.interceptors.response.use(
         }
       );
 
-      if (!data.access_token) throw new Error('No access token in session response');
+      if (!data.access_token) {
+        useAuthStore.getState().logout();
+        if (typeof window !== 'undefined') window.location.replace('/login');
+        throw new Error('No access token in session response');
+      }
 
       useAuthStore.getState().setAccessToken(data.access_token);
       flushQueue(null, data.access_token);

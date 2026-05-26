@@ -14,7 +14,7 @@ export type Appointment = {
 
 export const appointmentsApi = {
   list: async (limit = 20, offset = 0, signal?: AbortSignal) => {
-    const { data } = await api.get<{ data: Appointment[]; total: number }>('/appointments/', {
+    const { data } = await api.get<{ data: Appointment[]; total: number }>('/appointments', {
       params: { limit, offset },
       signal,
     });
@@ -27,7 +27,7 @@ export const appointmentsApi = {
     hospital_id: string;
     appointment_time: string;
   }): Promise<Appointment> => {
-    const { data } = await api.post<Appointment>('/appointments/', payload);
+    const { data } = await api.post<Appointment>('/appointments', payload);
     return data;
   },
 

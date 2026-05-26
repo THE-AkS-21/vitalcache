@@ -71,7 +71,6 @@ export default function PatientsPage() {
                 <TableRow>
                   <TableHead className="font-semibold">Name</TableHead>
                   <TableHead className="font-semibold">Age</TableHead>
-                  <TableHead className="font-semibold">Mobile</TableHead>
                   <TableHead className="font-semibold">Last Updated</TableHead>
                   <TableHead className="w-[50px]" />
                 </TableRow>
@@ -88,7 +87,6 @@ export default function PatientsPage() {
                       </div>
                     </TableCell>
                     <TableCell>{p.age != null ? `${p.age} yrs` : '—'}</TableCell>
-                    <TableCell>{p.mobile_number ?? p.phone_number ?? '—'}</TableCell>
                     <TableCell className="text-muted-foreground">
                       {new Date(p.updated_at).toLocaleDateString()}
                     </TableCell>

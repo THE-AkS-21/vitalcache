@@ -10,18 +10,23 @@ export const metadata: Metadata = {
     description: "Clinic Management System",
 };
 
+import { GoogleOAuthProvider } from '@react-oauth/google';
+
 export default function RootLayout({
                                        children,
                                    }: Readonly<{
     children: React.ReactNode;
 }>) {
+    const googleClientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || "placeholder-client-id.apps.googleusercontent.com";
     return (
         <html lang="en">
         <body className={inter.className}>
-        {/* 2. Add it here, outside of your main children structure */}
-        <ServerStatus />
+        <GoogleOAuthProvider clientId={googleClientId}>
+            {/* 2. Add it here, outside of your main children structure */}
+            <ServerStatus />
 
-        {children}
+            {children}
+        </GoogleOAuthProvider>
         </body>
         </html>
     );

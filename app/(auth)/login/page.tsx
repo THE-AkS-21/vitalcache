@@ -13,6 +13,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Icons } from '@/components/ui/icons'
 import Link from 'next/link'
+import { GoogleLogin } from '@react-oauth/google'
 
 type LoginFormData = LoginInput
 
@@ -109,6 +110,31 @@ export default function LoginPage() {
             )
         }
     }
+
+    const handleGoogleSuccess = async (credentialResponse: any) => {
+        setError(null)
+        try {
+            if (!credentialResponse.credential) throw new Error('No credential received');
+            const payload = await authApi.googleLogin(credentialResponse.credential);
+            setAccessToken(payload.access_token);
+            if (payload.user) setUser(payload.user);
+            setLoginSuccess(true);
+            setTimeout(() => {
+                router.replace('/dashboard')
+            }, 800)
+        } catch (err: unknown) {
+            const axiosErr = err as AxiosError<{ error?: { message?: string } }>
+            setError(
+                axiosErr?.response?.data?.error?.message ??
+                'Google Login failed. Please try again.'
+            )
+        }
+    }
+
+    // Only show Google Login when a real client ID is configured.
+    // An empty or placeholder client ID causes a Google 401 invalid_client error.
+    const googleClientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID
+    const hasGoogleAuth = Boolean(googleClientId && !googleClientId.includes('placeholder'))
 
     return (
         <div className="min-h-screen flex overflow-hidden bg-gradient-to-br from-gray-50 to-blue-50 relative">
@@ -345,7 +371,6 @@ export default function LoginPage() {
                                 </label>
                             </div>
 
-                            {/* Submit button */}
                             <Button
                                 type="submit"
                                 disabled={isSubmitting}
@@ -356,6 +381,26 @@ export default function LoginPage() {
                                 {/* Ripple effect on hover */}
                                 <div className="absolute inset-0 bg-white/20 transform scale-x-0 group-hover:scale-x-100 transition-transform duration-500 origin-left" />
                             </Button>
+
+                            <div className="relative my-6">
+                                <div className="absolute inset-0 flex items-center">
+                                    <div className="w-full border-t border-gray-200"></div>
+                                </div>
+                                <div className="relative flex justify-center text-sm">
+                                    <span className="px-2 bg-white/80 text-gray-500">Or continue with</span>
+                                </div>
+                            </div>
+
+                            <div className="flex justify-center mt-4">
+                                <GoogleLogin
+                                    onSuccess={handleGoogleSuccess}
+                                    onError={() => setError('Google login failed. Please use email/password.')}
+                                    theme="outline"
+                                    size="large"
+                                    text="signin_with"
+                                    shape="rectangular"
+                                />
+                            </div>
                         </form>
 
                         <div className="mt-6 text-center">

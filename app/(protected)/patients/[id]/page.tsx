@@ -1,9 +1,9 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
-import { getPatient, getPrescriptionHistory } from '@/lib/api/patients';
+import { getPatient } from '@/lib/api/patients';
 import type { Patient } from '@/lib/api/patients';
-import type { Prescription } from '@/lib/api/prescriptions';
+import { medicalReportsApi, type MedicalReport } from '@/lib/api/medical_reports';
 import { useParams } from 'next/navigation';
 import { DataTableSkeleton } from '@/components/shared/data-table-skeleton';
 
@@ -17,9 +17,9 @@ export default function PatientDetailPage() {
     enabled: Boolean(id),
   });
 
-  const historyQ = useQuery<Prescription[]>({
-    queryKey: ['patients', id, 'prescriptions'],
-    queryFn: ({ signal }) => getPrescriptionHistory(id, { limit: 20, offset: 0 }, signal),
+  const historyQ = useQuery<MedicalReport[]>({
+    queryKey: ['patients', id, 'medical-reports'],
+    queryFn: ({ signal }) => medicalReportsApi.listByPatient(id, { limit: 20, offset: 0 }, signal),
     enabled: Boolean(id),
   });
 
@@ -42,27 +42,29 @@ export default function PatientDetailPage() {
         <div className="card p-5 border-none shadow-lg bg-white/50 backdrop-blur-xl space-y-2">
           <h2 className="font-semibold text-gray-700 mb-3">Patient Details</h2>
           <div><span className="text-gray-500 text-sm">Age:</span> <span className="font-medium">{p.age ?? '—'}</span></div>
-          <div><span className="text-gray-500 text-sm">Mobile:</span> <span className="font-medium">{p.mobile_number ?? p.phone_number ?? '—'}</span></div>
           <div><span className="text-gray-500 text-sm">Gender:</span> <span className="font-medium">{p.gender ?? '—'}</span></div>
           <div><span className="text-gray-500 text-sm">Last Updated:</span> <span className="font-medium">{new Date(p.updated_at).toLocaleString()}</span></div>
         </div>
 
-        {/* Prescription History */}
+        {/* Medical Report History */}
         <div className="card p-5 border-none shadow-lg bg-white/50 backdrop-blur-xl">
-          <h2 className="font-semibold text-gray-700 mb-3">Prescription History</h2>
+          <h2 className="font-semibold text-gray-700 mb-3">Visit History</h2>
           {historyQ.isLoading ? (
             <DataTableSkeleton columnCount={2} rowCount={3} />
           ) : historyQ.data && historyQ.data.length > 0 ? (
             <ul className="space-y-2">
-              {historyQ.data.map((rx: Prescription) => (
-                <li key={rx.id} className="flex justify-between p-3 border rounded-lg bg-white/80">
-                  <span className="font-mono text-sm text-gray-600">#{rx.prescription_id.substring(0, 8)}</span>
+              {historyQ.data.map((rx) => (
+                <li key={rx.id} className="flex justify-between p-3 border rounded-lg bg-white/80 hover:bg-gray-50 transition-colors cursor-pointer" onClick={() => window.location.href = `/medical-reports/${rx.id}`}>
+                  <div>
+                      <span className="font-semibold text-indigo-900 block">{rx.disease_name}</span>
+                      <span className="font-mono text-xs text-gray-400">#{rx.report_id.substring(0, 8)}</span>
+                  </div>
                   <span className="text-gray-500 text-sm">{new Date(rx.created_at).toLocaleDateString()}</span>
                 </li>
               ))}
             </ul>
           ) : (
-            <p className="text-gray-400 text-sm">No prescriptions found.</p>
+            <p className="text-gray-400 text-sm">No visits found.</p>
           )}
         </div>
       </div>

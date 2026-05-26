@@ -15,6 +15,7 @@ export type Prescription = {
   patient_id: string;
   doctor_id: string;
   hospital_id: string;
+  disease_name?: string;
   medications: Medication[];
   notes: string;
   status: string;
@@ -27,13 +28,19 @@ export interface PrescriptionListParams {
   offset?: number;
 }
 
+export interface PaginatedPrescriptions {
+  data: Prescription[];
+  total: number;
+}
+
 export const prescriptionsApi = {
-  list: async (params: PrescriptionListParams = {}, signal?: AbortSignal): Promise<Prescription[]> => {
-    const { data } = await api.get<{ data: Prescription[]; total: number }>('/prescriptions/', {
-      params: { limit: params.limit ?? 50, offset: params.offset ?? 0 },
+  list: async (params: PrescriptionListParams = {}, signal?: AbortSignal): Promise<PaginatedPrescriptions> => {
+    const { data } = await api.get<PaginatedPrescriptions>(
+      '/prescriptions', {
+      params: { limit: params.limit ?? 20, offset: params.offset ?? 0 },
       signal,
     });
-    return data.data;
+    return data;
   },
 
   getPatientHistory: async (
@@ -41,12 +48,12 @@ export const prescriptionsApi = {
     limit = 20,
     offset = 0,
     signal?: AbortSignal
-  ): Promise<Prescription[]> => {
-    const { data } = await api.get<{ data: Prescription[]; total: number }>(
+  ): Promise<PaginatedPrescriptions> => {
+    const { data } = await api.get<PaginatedPrescriptions>(
       `/prescriptions/patient/${patientId}`,
       { params: { limit, offset }, signal }
     );
-    return data.data;
+    return data;
   },
 
   // Mutations intentionally omit signal — aborting POST mid-flight causes partial writes

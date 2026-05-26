@@ -1,51 +1,66 @@
 'use client';
 
-/**
- * NewPrescriptionPage
- *
- * Performance / correctness fixes:
- * ✅ ClayCard removed — was a broken import (never existed in @/components/ui/card)
- * ✅ framer-motion removed — AnimatePresence/motion.div replaced with CSS transitions
- * ✅ useEffect patient fetch → useQuery (benefits from QueryProvider staleTime + retry)
- * ✅ err: any → err: unknown + AxiosError type narrowing
- * ✅ patientsApi.list signature fixed (no positional args — uses params object now)
- */
-
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
-import { Save, User, Trash2, FileText, AlertCircle, Loader2 } from 'lucide-react';
+import { Save, User, Trash2, FileText, AlertCircle, Loader2, ListPlus } from 'lucide-react';
 import { MedicineSearch } from '@/components/ui/medicine-search';
 import { listPatients, type Patient } from '@/lib/api/patients';
-import { prescriptionsApi, type Medication } from '@/lib/api/prescriptions';
+import { prescriptionsApi, type Prescription, type Medication } from '@/lib/api/prescriptions';
+import { medicalReportsApi } from '@/lib/api/medical_reports';
 import { type Medicine } from '@/lib/api/medicines';
 import { useAuthStore } from '@/store/authStore';
 import type { AxiosError } from 'axios';
+import apiClient from '@/services/api.client';
 
-export default function NewPrescriptionPage() {
+export default function NewReportPage() {
   const router = useRouter();
 
-  // ── Auth context ─────────────────────────────────────────────────────────────
-  // hospital_id is not yet returned by /profiles/me. We use doctor_id as a
-  // temporary stand-in. When the backend adds hospital_id to the profile
-  // response, replace `doctor_id` with `hospital_id` here and in authStore.
-  // TODO(backend): wire hospital_id from GoProfileResponse → authStore → here.
   const doctorId = useAuthStore((s) => s.user?.doctor_id ?? null);
 
-  // ── Form state ───────────────────────────────────────────────────────────────
   const [selectedPatientId, setSelectedPatientId] = useState('');
+  const [diseaseName, setDiseaseName] = useState('');
+  const [diagnosisBody, setDiagnosisBody] = useState('');
   const [medications, setMedications] = useState<Medication[]>([]);
-  const [notes, setNotes] = useState('');
+  const [precautions, setPrecautions] = useState('');
+  const [isPaid, setIsPaid] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // ── Patient list via React Query — no manual useEffect + setState ────────────
+  const { data: doctorProfile } = useQuery({
+    queryKey: ['doctors', doctorId],
+    queryFn: async () => {
+      if (!doctorId) return null;
+      const res = await apiClient.get(`/api/v1/doctors/${doctorId}`);
+      return res.data;
+    },
+    enabled: !!doctorId,
+  });
+
   const { data: patients = [], isLoading: loadingPatients } = useQuery<Patient[]>({
     queryKey: ['patients', 'list'],
     queryFn: ({ signal }) => listPatients({ limit: 100 }, signal),
   });
 
-  // ── Medicine handlers ────────────────────────────────────────────────────────
+  const { data: templates = [], isLoading: loadingTemplates } = useQuery<Prescription[]>({
+    queryKey: ['prescriptions', 'templates'],
+    queryFn: ({ signal }) => prescriptionsApi.list({ limit: 100 }, signal),
+  });
+
+  const handleApplyTemplate = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const templateId = e.target.value;
+    if (!templateId) return;
+    const template = templates.find((t) => t.id === templateId);
+    if (!template) return;
+    
+    // Auto-populate fields from the selected template. Note this is a clone so edits won't affect the original template.
+    if (template.disease_name) setDiseaseName(template.disease_name);
+    if (template.notes) setPrecautions(template.notes);
+    if (template.medications) {
+        setMedications([...template.medications]);
+    }
+  };
+
   const handleAddMedicine = (med: Medicine) => {
     if (medications.some((m) => m.medicine_id === med.id)) return;
     const newMed: Medication = {
@@ -71,10 +86,10 @@ export default function NewPrescriptionPage() {
     setMedications((prev) => prev.filter((_, i) => i !== index));
   };
 
-  // ── Submit ───────────────────────────────────────────────────────────────────
   const handleSubmit = async () => {
     setError(null);
     if (!selectedPatientId) { setError('Please select a patient.'); return; }
+    if (!diseaseName.trim()) { setError('Please enter a disease name.'); return; }
     if (medications.length === 0) { setError('Please add at least one medication.'); return; }
     if (!doctorId) {
       setError('Your doctor profile is not loaded. Please refresh and try again.');
@@ -83,112 +98,142 @@ export default function NewPrescriptionPage() {
 
     setIsSubmitting(true);
     try {
-      const res = await prescriptionsApi.create({
+      const res = await medicalReportsApi.create({
         patient_id: selectedPatientId,
-        // Temporary: doctorId is used as hospital_id until the backend returns
-        // a dedicated hospital_id field in /profiles/me.
-        // TODO(backend): replace with user?.hospital_id once available.
-        hospital_id: doctorId,
+        hospital_id: doctorId, // temporary until real hospital ID is given
+        disease_name: diseaseName,
+        diagnosis_body: diagnosisBody,
         medications,
-        notes,
+        precautions: precautions,
       });
-      router.push(`/prescriptions/${res.id}`);
+
+      // If a fee is set, create the billing record
+      if (doctorProfile?.consultation_fee) {
+        await apiClient.post('/api/v1/billings', {
+            patient_id: selectedPatientId,
+            doctor_id: doctorId,
+            medical_report_id: res.id,
+            amount: doctorProfile.consultation_fee,
+            status: isPaid ? 'PAID' : 'PENDING'
+        });
+      }
+
+      router.push(`/medical-reports/${res.id}`);
     } catch (err: unknown) {
       const axiosErr = err as AxiosError<{ error?: { message?: string } }>;
-      setError(axiosErr?.response?.data?.error?.message ?? 'Failed to create prescription.');
+      setError(axiosErr?.response?.data?.error?.message ?? 'Failed to create medical report.');
       setIsSubmitting(false);
     }
   };
 
   return (
     <div className="p-6 max-w-5xl mx-auto space-y-6 animate-fade-in">
-      {/* Page header */}
       <div className="animate-slide-in-left">
         <h1 className="text-3xl font-bold text-gray-900 flex items-center gap-3">
           <FileText className="text-indigo-500 flex-shrink-0" size={32} aria-hidden="true" />
-          Create New Prescription
+          Create Medical Report
         </h1>
-        <p className="text-gray-500 mt-1">Search medicines, define dosages, and generate a printable record.</p>
+        <p className="text-gray-500 mt-1">Record a patient visit, diagnose, and prescribe treatment.</p>
       </div>
 
-      {/* Error banner — CSS fade-in, no framer-motion */}
       {error && (
-        <div
-          className="p-4 bg-red-50 text-red-700 rounded-xl flex items-center gap-3 border border-red-200 shadow-sm animate-fade-in"
-          role="alert"
-        >
+        <div className="p-4 bg-red-50 text-red-700 rounded-xl flex items-center gap-3 border border-red-200 shadow-sm animate-fade-in">
           <AlertCircle size={20} className="flex-shrink-0" aria-hidden="true" />
           <span className="text-sm font-medium">{error}</span>
         </div>
       )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* ── LEFT: Patient + Medicine search ─────────────────────────────────── */}
+        {/* LEFT COLUMN */}
         <div className="lg:col-span-1 space-y-4">
-          {/* Patient selector */}
           <div className="card p-5 border-none shadow-xl bg-white/50 backdrop-blur-xl space-y-3">
             <h2 className="text-base font-bold text-gray-700 flex items-center gap-2">
-              <User size={18} className="text-indigo-500" aria-hidden="true" />
-              Select Patient
+              <User size={18} className="text-indigo-500" /> Select Patient
             </h2>
             {loadingPatients ? (
               <p className="text-sm text-gray-400 animate-pulse">Loading patients...</p>
             ) : (
               <select
-                id="patient-select"
                 value={selectedPatientId}
                 onChange={(e) => setSelectedPatientId(e.target.value)}
-                className="w-full p-3 rounded-xl border border-slate-200 bg-white/80 text-gray-700 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 transition-all"
-                aria-label="Select patient"
+                className="w-full p-3 rounded-xl border border-slate-200 bg-white/80 text-gray-700 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
               >
                 <option value="" disabled>Choose a patient...</option>
                 {patients.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name ?? `${p.first_name} ${p.last_name}`}
-                  </option>
+                  <option key={p.id} value={p.id}>{p.name ?? `${p.first_name} ${p.last_name}`}</option>
                 ))}
               </select>
             )}
           </div>
 
-          {/* Medicine search */}
+          <div className="card p-5 border-none shadow-xl bg-indigo-50/50 backdrop-blur-xl space-y-3 border border-indigo-100">
+            <h2 className="text-base font-bold text-indigo-900 flex items-center gap-2">
+              <ListPlus size={18} className="text-indigo-500" /> Apply Template
+            </h2>
+            <p className="text-xs text-indigo-700">Select a pre-defined prescription to auto-fill treatment.</p>
+            {loadingTemplates ? (
+               <p className="text-sm text-gray-400 animate-pulse">Loading templates...</p>
+            ) : (
+                <select
+                onChange={handleApplyTemplate}
+                defaultValue=""
+                className="w-full p-3 rounded-xl border border-indigo-200 bg-white text-indigo-900 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                >
+                <option value="" disabled>Select a Template...</option>
+                {templates.map((t) => (
+                    <option key={t.id} value={t.id}>{t.disease_name || `Template ${t.id.slice(0,6)}`} ({t.medications?.length || 0} meds)</option>
+                ))}
+                </select>
+            )}
+          </div>
+
           <div className="card p-5 border-none shadow-xl bg-white/50 backdrop-blur-xl space-y-3">
             <h2 className="text-base font-bold text-gray-700">Add Medicine</h2>
             <MedicineSearch onSelect={handleAddMedicine} />
           </div>
         </div>
 
-        {/* ── RIGHT: Medications list + notes ─────────────────────────────────── */}
+        {/* RIGHT COLUMN */}
         <div className="lg:col-span-2 space-y-4">
-          <div className="card p-5 border-none shadow-xl bg-white/50 backdrop-blur-xl min-h-[400px] flex flex-col">
+          <div className="card p-5 border-none shadow-xl bg-white/50 backdrop-blur-xl flex flex-col">
             <h2 className="text-lg font-bold text-gray-800 mb-4 pb-2 border-b border-gray-200">
-              Rx Medications
+              Diagnosis & Treatment
             </h2>
 
+            <div className="space-y-4 mb-6">
+                <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-1">Disease Name <span className="text-red-500">*</span></label>
+                    <input 
+                        type="text" 
+                        value={diseaseName} 
+                        onChange={(e) => setDiseaseName(e.target.value)} 
+                        className="w-full p-3 rounded-xl border border-slate-200 bg-white/80 focus:ring-2 focus:ring-indigo-400 outline-none text-gray-800 font-medium"
+                        placeholder="e.g. Viral Fever"
+                    />
+                </div>
+                <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-1">Diagnosis Notes / Body</label>
+                    <textarea 
+                        value={diagnosisBody} 
+                        onChange={(e) => setDiagnosisBody(e.target.value)} 
+                        className="w-full p-3 rounded-xl border border-slate-200 bg-white/80 focus:ring-2 focus:ring-indigo-400 outline-none text-gray-800 min-h-[80px] resize-none"
+                        placeholder="Patient presented with 101F fever, chills..."
+                    />
+                </div>
+            </div>
+
+            <h3 className="text-md font-bold text-gray-700 mb-3">Rx Medications</h3>
             {medications.length === 0 ? (
-              <div className="flex-1 flex flex-col items-center justify-center text-gray-400 gap-3">
-                <FileText size={48} className="opacity-40" aria-hidden="true" />
-                <p className="font-medium">No medications added yet.</p>
-                <p className="text-sm">Use the search bar on the left to add medicines.</p>
+              <div className="flex-1 flex flex-col items-center justify-center text-gray-400 gap-3 py-8 bg-gray-50/50 rounded-xl">
+                <FileText size={48} className="opacity-40" />
+                <p className="font-medium">No medications added.</p>
               </div>
             ) : (
-              <div className="flex-1 space-y-3">
+              <div className="space-y-3">
                 {medications.map((med, idx) => (
-                  <div
-                    key={`${med.medicine_id}-${idx}`}
-                    className="relative bg-white/80 border border-slate-100 rounded-xl p-4 shadow-sm transition-all duration-200 hover:shadow-md"
-                  >
-                    <button
-                      type="button"
-                      onClick={() => removeMedication(idx)}
-                      className="absolute top-3 right-3 text-gray-300 hover:text-red-500 transition-colors"
-                      aria-label={`Remove ${med.name}`}
-                    >
-                      <Trash2 size={16} aria-hidden="true" />
-                    </button>
-
-                    <h3 className="font-bold text-indigo-900 mb-3">{med.name}</h3>
-
+                  <div key={`${med.medicine_id}-${idx}`} className="relative bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
+                    <button onClick={() => removeMedication(idx)} className="absolute top-3 right-3 text-gray-400 hover:text-red-500"><Trash2 size={16} /></button>
+                    <h4 className="font-bold text-indigo-900 mb-3">{med.name}</h4>
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                       {(
                         [
@@ -199,25 +244,13 @@ export default function NewPrescriptionPage() {
                         ] as const
                       ).map(({ field, label, type, value }) => (
                         <div key={field}>
-                          <label
-                            htmlFor={`${med.medicine_id}-${field}`}
-                            className="text-xs font-semibold text-gray-400 uppercase tracking-wide"
-                          >
-                            {label}
-                          </label>
+                          <label className="text-xs font-semibold text-gray-400 uppercase tracking-wide">{label}</label>
                           <input
-                            id={`${med.medicine_id}-${field}`}
                             type={type}
                             value={value}
                             min={type === 'number' ? 1 : undefined}
-                            onChange={(e) =>
-                              updateMedication(
-                                idx,
-                                field,
-                                type === 'number' ? (parseInt(e.target.value) || 1) : e.target.value
-                              )
-                            }
-                            className="w-full mt-1 p-1.5 bg-transparent border-b border-gray-200 focus:border-indigo-500 outline-none text-sm font-medium text-gray-800 transition-colors"
+                            onChange={(e) => updateMedication(idx, field, type === 'number' ? (parseInt(e.target.value) || 1) : e.target.value)}
+                            className="w-full mt-1 p-1.5 bg-transparent border-b border-gray-200 focus:border-indigo-500 outline-none text-sm font-medium text-gray-800"
                           />
                         </div>
                       ))}
@@ -227,33 +260,41 @@ export default function NewPrescriptionPage() {
               </div>
             )}
 
-            {/* Clinical notes */}
             <div className="mt-6">
-              <label htmlFor="rx-notes" className="block text-sm font-semibold text-gray-700 mb-2">
-                Clinical Notes &amp; Advice
-              </label>
+              <label className="block text-sm font-semibold text-gray-700 mb-2">Precautions & Follow-up</label>
               <textarea
-                id="rx-notes"
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                placeholder="Drink plenty of water, rest for 3 days..."
-                className="w-full p-3 rounded-xl border border-slate-200 bg-white/80 text-gray-700 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 min-h-[100px] resize-none transition-all"
+                value={precautions}
+                onChange={(e) => setPrecautions(e.target.value)}
+                placeholder="Drink plenty of water..."
+                className="w-full p-3 rounded-xl border border-slate-200 bg-white/80 focus:ring-2 focus:ring-indigo-400 min-h-[100px] resize-none"
               />
             </div>
 
-            {/* Submit */}
+            {doctorProfile?.consultation_fee && (
+              <div className="mt-6 p-4 rounded-xl bg-green-50 border border-green-200 flex items-center justify-between">
+                  <div>
+                      <h4 className="font-bold text-green-900">Consultation Fee: ${doctorProfile.consultation_fee}</h4>
+                      <p className="text-sm text-green-700">Record payment status for this visit.</p>
+                  </div>
+                  <label className="flex items-center gap-3 cursor-pointer">
+                      <input 
+                          type="checkbox" 
+                          checked={isPaid}
+                          onChange={(e) => setIsPaid(e.target.checked)}
+                          className="w-5 h-5 rounded text-green-600 focus:ring-green-500 border-gray-300"
+                      />
+                      <span className="font-bold text-green-900">Mark as Paid</span>
+                  </label>
+              </div>
+            )}
+
             <div className="mt-6 pt-4 border-t border-gray-100 flex justify-end">
               <button
-                type="button"
                 onClick={handleSubmit}
-                disabled={isSubmitting || medications.length === 0 || !selectedPatientId || !doctorId}
-                className="flex items-center gap-2 px-6 py-3 bg-indigo-600 text-white font-bold rounded-xl shadow-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all hover:-translate-y-0.5 active:translate-y-0"
-                aria-busy={isSubmitting}
+                disabled={isSubmitting || medications.length === 0 || !selectedPatientId || !diseaseName}
+                className="flex items-center gap-2 px-6 py-3 bg-indigo-600 text-white font-bold rounded-xl shadow-lg hover:bg-indigo-700 disabled:opacity-50 transition-all"
               >
-                {isSubmitting
-                  ? <><Loader2 className="animate-spin" size={18} aria-hidden="true" /> Generating...</>
-                  : <><Save size={18} aria-hidden="true" /> Save &amp; Print Prescription</>
-                }
+                {isSubmitting ? <><Loader2 className="animate-spin" size={18} /> Saving...</> : <><Save size={18} /> Save &amp; View Report</>}
               </button>
             </div>
           </div>
